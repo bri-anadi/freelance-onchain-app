@@ -7,6 +7,7 @@ import { Identity, Avatar, Name, Badge, Address } from '@coinbase/onchainkit/ide
 import JobListingComponent from '@/components/JobListing';
 import JobCreateForm from '@/components/JobCreateForm';
 import UserDashboard from '@/components/UserDashboard';
+import AdminPanel from '@/components/AdminPanel';
 import { Toaster } from '@/components/ui/toaster';
 import { useAccount } from 'wagmi';
 import { ThemeToggle } from '@/components/ThemeToggle';
@@ -65,10 +66,11 @@ export default function App() {
           </div>
         ) : (
           <Tabs defaultValue="explore" className="w-full">
-            <TabsList className="grid grid-cols-3 mb-8">
+            <TabsList className="grid grid-cols-4 mb-8">
               <TabsTrigger value="explore">Explore Jobs</TabsTrigger>
               <TabsTrigger value="create">Post a Job</TabsTrigger>
               <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
+              <TabsTrigger value="admin">Admin</TabsTrigger>
             </TabsList>
 
             <TabsContent value="explore" className="space-y-4">
@@ -81,6 +83,10 @@ export default function App() {
 
             <TabsContent value="dashboard">
               <UserDashboard />
+            </TabsContent>
+
+            <TabsContent value="admin">
+              <AdminPanel />
             </TabsContent>
           </Tabs>
         )}

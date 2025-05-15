@@ -9,132 +9,98 @@ import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { formatEther, formatAddress, calculateTimeLeft, JobStatus, ApplicationStatus } from '@/lib/utils';
+import { useContractRead, useContractWrite } from '@/hooks/useContract';
+import { useToast } from '@/components/ui/use-toast';
 import { Loader2 } from 'lucide-react';
-
-type Job = {
-  id: number;
-  title: string;
-  description: string;
-  reward: bigint;
-  deadline: number;
-  status: number;
-};
-
-type Application = {
-  id: number;
-  jobId: number;
-  jobTitle: string;
-  proposal: string;
-  status: number;
-  timestamp: number;
-};
-
-type Submission = {
-  id: number;
-  jobId: number;
-  jobTitle: string;
-  deliverable: string;
-  aiVerified: boolean;
-  posterApproved: boolean;
-  timestamp: number;
-};
 
 export default function UserDashboard() {
   const { address, isConnected } = useAccount();
-  const [postedJobs, setPostedJobs] = useState<Job[]>([]);
-  const [applications, setApplications] = useState<Application[]>([]);
-  const [submissions, setSubmissions] = useState<Submission[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [submittingWork, setSubmittingWork] = useState(false);
+  const [selectedJob, setSelectedJob] = useState<any | null>(null);
   const [deliverable, setDeliverable] = useState('');
-  const [selectedJob, setSelectedJob] = useState<Job | null>(null);
+  const [submittingWork, setSubmittingWork] = useState(false);
+  const [txHash, setTxHash] = useState<string | null>(null);
+  const { toast } = useToast();
 
+  // Use contract hooks
+  const {
+    loading,
+    getUserApplications,
+    getUserPostedJobs,
+    getUserSubmissions
+  } = useContractRead();
+
+  const {
+    submitWork,
+    approveWork,
+    cancelJob,
+    acceptApplication,
+    isWritePending
+  } = useContractWrite();
+
+  // State for dashboard data
+  const [applications, setApplications] = useState<any[]>([]);
+  const [postedJobs, setPostedJobs] = useState<any[]>([]);
+  const [submissions, setSubmissions] = useState<any[]>([]);
+  const [loadingDashboard, setLoadingDashboard] = useState(true);
+
+  // Fetch user data
   useEffect(() => {
     const fetchUserData = async () => {
-      if (!isConnected) return;
+      if (!isConnected || !address) return;
 
       try {
-        setLoading(true);
-        // In a real app, we would fetch data from the blockchain
-        // For demo purposes, we'll simulate with mock data
+        setLoadingDashboard(true);
 
-        setTimeout(() => {
-          // Mock posted jobs
-          setPostedJobs([
-            {
-              id: 3,
-              title: 'Develop Solidity Smart Contract',
-              description: 'Need a developer to write a custom smart contract for a DAO.',
-              reward: BigInt('2000000000000000000'), // 2 ETH
-              deadline: Math.floor(Date.now() / 1000) + 604800, // 1 week from now
-              status: JobStatus.OPEN,
-            },
-          ]);
+        // Fetch user applications, posted jobs, and submissions
+        const [
+          userApplications,
+          userPostedJobs,
+          userSubmissions
+        ] = await Promise.all([
+          getUserApplications(address),
+          getUserPostedJobs(address),
+          getUserSubmissions(address)
+        ]);
 
-          // Mock applications
-          setApplications([
-            {
-              id: 1,
-              jobId: 1,
-              jobTitle: 'Build a DeFi Dashboard',
-              proposal: 'I have 3 years of experience building DeFi interfaces and can deliver this dashboard in 5 days.',
-              status: ApplicationStatus.PENDING,
-              timestamp: Math.floor(Date.now() / 1000) - 86400, // 1 day ago
-            },
-            {
-              id: 2,
-              jobId: 2,
-              jobTitle: 'Design NFT Collection',
-              proposal: 'I am a professional designer specializing in NFT art and can create a unique collection for your project.',
-              status: ApplicationStatus.ACCEPTED,
-              timestamp: Math.floor(Date.now() / 1000) - 172800, // 2 days ago
-            },
-          ]);
-
-          // Mock submissions
-          setSubmissions([
-            {
-              id: 1,
-              jobId: 2,
-              jobTitle: 'Design NFT Collection',
-              deliverable: 'I have completed the 10 NFT designs as requested. You can view them at https://example.com/nft-designs',
-              aiVerified: true,
-              posterApproved: false,
-              timestamp: Math.floor(Date.now() / 1000) - 43200, // 12 hours ago
-            },
-          ]);
-
-          setLoading(false);
-        }, 1000);
-
+        setApplications(userApplications);
+        setPostedJobs(userPostedJobs);
+        setSubmissions(userSubmissions);
+        setLoadingDashboard(false);
       } catch (error) {
         console.error('Error fetching user data:', error);
-        setLoading(false);
+        setLoadingDashboard(false);
+        toast({
+          title: 'Error Fetching Data',
+          description: 'There was an error loading your dashboard. Please try again.',
+          variant: 'destructive',
+        });
       }
     };
 
     fetchUserData();
-  }, [isConnected]);
+  }, [isConnected, address]);
 
+  // Handle submit work
   const handleSubmitWork = async (jobId: number) => {
     if (!isConnected || !deliverable.trim()) return;
 
     try {
       setSubmittingWork(true);
-      // In a real app, we would call the contract method
-      console.log(`Submitting work for job ${jobId}: ${deliverable}`);
+      // Call contract method to submit work
+      const hash = await submitWork(jobId, deliverable);
+      // Solo almacenar el hash si es un string válido
+      if (typeof hash === 'string') {
+        setTxHash(hash);
+      }
 
-      // Simulate blockchain delay
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      // Update the UI
+      // Reset form and close dialog
       setSubmittingWork(false);
       setSelectedJob(null);
       setDeliverable('');
 
-      // Add the new submission to the list
-      const newSubmission: Submission = {
-        id: Math.floor(Math.random() * 1000),
+      // Add the new submission to the list (optimistic update)
+      const newSubmission = {
+        id: Math.floor(Math.random() * 1000), // Temporary ID until we refresh
         jobId,
         jobTitle: applications.find(app => app.jobId === jobId)?.jobTitle || '',
         deliverable,
@@ -146,10 +112,108 @@ export default function UserDashboard() {
       setSubmissions(prev => [...prev, newSubmission]);
 
       // Show success message
-      alert('Work submitted successfully!');
+      toast({
+        title: 'Work Submitted Successfully',
+        description: typeof hash === 'string' ? `Transaction hash: ${hash}` : 'Transaction submitted',
+      });
     } catch (error) {
       console.error('Error submitting work:', error);
       setSubmittingWork(false);
+      toast({
+        title: 'Error Submitting Work',
+        description: 'There was an error submitting your work. Please try again.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  // Handle approve work
+  const handleApproveWork = async (submissionId: number) => {
+    if (!isConnected) return;
+
+    try {
+      // Call contract method to approve work
+      const hash = await approveWork(submissionId);
+
+      // Update the submission in the list (optimistic update)
+      setSubmissions(prev =>
+        prev.map(sub =>
+          sub.id === submissionId ? { ...sub, posterApproved: true } : sub
+        )
+      );
+
+      // Show success message
+      toast({
+        title: 'Work Approved Successfully',
+        description: typeof hash === 'string' ? `Transaction hash: ${hash}` : 'Transaction submitted',
+      });
+    } catch (error) {
+      console.error('Error approving work:', error);
+      toast({
+        title: 'Error Approving Work',
+        description: 'There was an error approving the work. Please try again.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  // Handle cancel job
+  const handleCancelJob = async (jobId: number) => {
+    if (!isConnected) return;
+
+    try {
+      // Call contract method to cancel job
+      const hash = await cancelJob(jobId);
+
+      // Update the job in the list (optimistic update)
+      setPostedJobs(prev =>
+        prev.map(job =>
+          job.id === jobId ? { ...job, status: JobStatus.CANCELLED } : job
+        )
+      );
+
+      // Show success message
+      toast({
+        title: 'Job Cancelled Successfully',
+        description: typeof hash === 'string' ? `Transaction hash: ${hash}` : 'Transaction submitted',
+      });
+    } catch (error) {
+      console.error('Error cancelling job:', error);
+      toast({
+        title: 'Error Cancelling Job',
+        description: 'There was an error cancelling the job. Please try again.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  // Handle accept application
+  const handleAcceptApplication = async (applicationId: number) => {
+    if (!isConnected) return;
+
+    try {
+      // Call contract method to accept application
+      const hash = await acceptApplication(applicationId);
+
+      // Update the application in the list (optimistic update)
+      setApplications(prev =>
+        prev.map(app =>
+          app.id === applicationId ? { ...app, status: ApplicationStatus.ACCEPTED } : app
+        )
+      );
+
+      // Show success message
+      toast({
+        title: 'Application Accepted Successfully',
+        description: typeof hash === 'string' ? `Transaction hash: ${hash}` : 'Transaction submitted',
+      });
+    } catch (error) {
+      console.error('Error accepting application:', error);
+      toast({
+        title: 'Error Accepting Application',
+        description: 'There was an error accepting the application. Please try again.',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -162,7 +226,7 @@ export default function UserDashboard() {
     );
   }
 
-  if (loading) {
+  if (loadingDashboard) {
     return (
       <div className="flex justify-center items-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -215,7 +279,7 @@ export default function UserDashboard() {
                     {app.status === ApplicationStatus.ACCEPTED && (
                       <Dialog>
                         <DialogTrigger asChild>
-                          <Button onClick={() => setSelectedJob({ id: app.jobId, title: app.jobTitle } as Job)}>
+                          <Button onClick={() => setSelectedJob({ id: app.jobId, title: app.jobTitle })}>
                             Submit Work
                           </Button>
                         </DialogTrigger>
@@ -232,14 +296,15 @@ export default function UserDashboard() {
                               value={deliverable}
                               onChange={(e) => setDeliverable(e.target.value)}
                               className="min-h-[150px]"
+                              disabled={submittingWork || isWritePending}
                             />
                           </div>
                           <DialogFooter>
                             <Button
                               onClick={() => handleSubmitWork(app.jobId)}
-                              disabled={submittingWork || !deliverable.trim()}
+                              disabled={submittingWork || !deliverable.trim() || isWritePending}
                             >
-                              {submittingWork && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                              {(submittingWork || isWritePending) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                               Submit Work
                             </Button>
                           </DialogFooter>
@@ -267,12 +332,15 @@ export default function UserDashboard() {
                       <CardTitle className="text-lg">{job.title}</CardTitle>
                       <Badge variant={
                         job.status === JobStatus.OPEN ? "default" :
-                        job.status === JobStatus.COMPLETED ? "outline" :
+                        job.status === JobStatus.COMPLETED ? "success" :
                         job.status === JobStatus.CANCELLED ? "destructive" :
+                        job.status === JobStatus.AI_VERIFIED ? "default" :
                         "secondary"
                       }>
                         {job.status === JobStatus.OPEN ? "Open" :
                          job.status === JobStatus.ASSIGNED ? "Assigned" :
+                         job.status === JobStatus.SUBMITTED ? "Submitted" :
+                         job.status === JobStatus.AI_VERIFIED ? "AI Verified" :
                          job.status === JobStatus.COMPLETED ? "Completed" :
                          "Cancelled"}
                       </Badge>
@@ -293,7 +361,14 @@ export default function UserDashboard() {
                     <div className="flex space-x-2">
                       <Button variant="outline">View Applications</Button>
                       {job.status === JobStatus.OPEN && (
-                        <Button variant="destructive">Cancel Job</Button>
+                        <Button
+                          variant="destructive"
+                          onClick={() => handleCancelJob(job.id)}
+                          disabled={isWritePending}
+                        >
+                          {isWritePending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                          Cancel Job
+                        </Button>
                       )}
                     </div>
                   </CardFooter>
@@ -319,7 +394,7 @@ export default function UserDashboard() {
                         <Badge variant={submission.aiVerified ? "default" : "secondary"}>
                           {submission.aiVerified ? "AI Verified" : "Pending AI Verification"}
                         </Badge>
-                        <Badge variant={submission.posterApproved ? "default" : "secondary"}>
+                        <Badge variant={submission.posterApproved ? "success" : "secondary"}>
                           {submission.posterApproved ? "Approved" : "Pending Approval"}
                         </Badge>
                       </div>
@@ -335,6 +410,17 @@ export default function UserDashboard() {
                       Submitted on {new Date(submission.timestamp * 1000).toLocaleDateString()}
                     </div>
                   </CardContent>
+                  {address === submission.poster && !submission.posterApproved && (
+                    <CardFooter>
+                      <Button
+                        onClick={() => handleApproveWork(submission.id)}
+                        disabled={isWritePending}
+                      >
+                        {isWritePending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        Approve Work
+                      </Button>
+                    </CardFooter>
+                  )}
                 </Card>
               ))
             ) : (

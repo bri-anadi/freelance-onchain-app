@@ -37,14 +37,16 @@ export function calculateTimeLeft(deadline: number): string {
 }
 
 export enum JobStatus {
-  OPEN = 0,
-  ASSIGNED = 1,
-  COMPLETED = 2,
-  CANCELLED = 3
+  OPEN = 0,          // Open - Job is open for applications
+  ASSIGNED = 1,      // Assigned - Job has been assigned to a freelancer
+  SUBMITTED = 2,     // Submitted - Work has been submitted by the freelancer
+  AI_VERIFIED = 3,   // AIVerified - Work has been verified by AI
+  COMPLETED = 4,     // Completed - Work has been approved and payment released
+  CANCELLED = 5      // Cancelled - Job has been cancelled
 }
 
 export enum ApplicationStatus {
-  PENDING = 0,
-  ACCEPTED = 1,
-  REJECTED = 2
+  PENDING = 0,    // Application is pending
+  ACCEPTED = 1,   // Application has been accepted
+  REJECTED = 2    // Application has been rejected
 }
