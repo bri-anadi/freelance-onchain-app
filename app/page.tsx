@@ -1,142 +1,97 @@
 'use client';
 
-import {
-  ConnectWallet,
-  Wallet,
-  WalletDropdown,
-  WalletDropdownLink,
-  WalletDropdownDisconnect,
-  WalletDropdownBasename,
-} from '@coinbase/onchainkit/wallet';
-import {
-  Address,
-  Avatar,
-  Name,
-  Badge,
-  Identity,
-  EthBalance,
-  Socials
-} from '@coinbase/onchainkit/identity';
-import ArrowSvg from './svg/ArrowSvg';
-import ImageSvg from './svg/Image';
-import OnchainkitSvg from './svg/OnchainKit';
-
-const components = [
-  {
-    name: 'Transaction',
-    url: 'https://onchainkit.xyz/transaction/transaction',
-  },
-  { name: 'Swap', url: 'https://onchainkit.xyz/swap/swap' },
-  { name: 'Checkout', url: 'https://onchainkit.xyz/checkout/checkout' },
-  { name: 'Wallet', url: 'https://onchainkit.xyz/wallet/wallet' },
-  { name: 'Identity', url: 'https://onchainkit.xyz/identity/identity' },
-];
-
-const templates = [
-  { name: 'NFT', url: 'https://github.com/coinbase/onchain-app-template' },
-  { name: 'Commerce', url: 'https://github.com/coinbase/onchain-commerce-template' },
-  { name: 'Fund', url: 'https://github.com/fakepixels/fund-component' },
-];
+import { useState, useEffect } from 'react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ConnectWallet, Wallet, WalletDropdown, WalletDropdownDisconnect, WalletDropdownBasename } from '@coinbase/onchainkit/wallet';
+import { Identity, Avatar, Name, Badge, Address } from '@coinbase/onchainkit/identity';
+import JobListingComponent from '@/components/JobListing';
+import JobCreateForm from '@/components/JobCreateForm';
+import UserDashboard from '@/components/UserDashboard';
+import { Toaster } from '@/components/ui/toaster';
+import { useAccount } from 'wagmi';
+import { ThemeToggle } from '@/components/ThemeToggle';
 
 export default function App() {
+  const { isConnected } = useAccount();
+  const [connected, setConnected] = useState(false);
+
+  // Update connected state when account connection changes
+  useEffect(() => {
+    setConnected(isConnected);
+  }, [isConnected]);
+
   return (
-    <div className="flex flex-col min-h-screen font-sans dark:bg-background dark:text-white bg-white text-black">
-      <header className="pt-4 pr-4">
-        <div className="flex justify-end">
-          <div className="wallet-container">
-            <Wallet>
-              <ConnectWallet>
-                <Avatar className="h-6 w-6" />
-                <Name />
-              </ConnectWallet>
-              <WalletDropdown>
-                <Identity className="px-4 pt-3 pb-2" hasCopyAddressOnClick>
-                  <Avatar />
-                  <Name >
-                    <Badge tooltip={true} />
-                  </Name>
-                  <Address />
-                  <EthBalance />
-                  <Socials />
-                </Identity>
-                <WalletDropdownBasename />
-                <WalletDropdownLink
-                  icon="wallet"
-                  href="https://keys.coinbase.com"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Wallet
-                </WalletDropdownLink>
-                <WalletDropdownDisconnect />
-              </WalletDropdown>
-            </Wallet>
+    <div className="flex flex-col min-h-screen bg-background">
+      <header className="border-b">
+        <div className="container mx-auto py-4 px-4 flex justify-between items-center">
+          <h1 className="text-2xl font-bold">BaseLance</h1>
+          <div className="flex items-center gap-4">
+            <ThemeToggle />
+            <div className="wallet-container">
+              <Wallet>
+                <ConnectWallet>
+                  <Avatar className="h-6 w-6" />
+                  <Name />
+                </ConnectWallet>
+                <WalletDropdown>
+                  <Identity className="px-4 pt-3 pb-2" hasCopyAddressOnClick>
+                    <Avatar />
+                    {/* Simplified structure to avoid tag issues */}
+                    <Name />
+                    <Address />
+                  </Identity>
+                  <WalletDropdownBasename />
+                  <WalletDropdownDisconnect />
+                </WalletDropdown>
+              </Wallet>
+            </div>
           </div>
         </div>
       </header>
 
-      <main className="flex-grow flex items-center justify-center">
-        <div className="max-w-4xl w-full p-4">
-          <div className="w-1/3 mx-auto mb-6">
-            <ImageSvg />
-          </div>
-          <div className="flex justify-center mb-6">
-            <a target="_blank" rel="_template" href="https://onchainkit.xyz">
-              <OnchainkitSvg className="dark:text-white text-black" />
-            </a>
-          </div>
-          <p className="text-center mb-6">
-            Get started by editing
-            <code className="p-1 ml-1 rounded dark:bg-gray-800 bg-gray-200">app/page.tsx</code>.
-          </p>
-          <div className="flex flex-col items-center">
-            <div className="max-w-2xl w-full">
-              <div className="flex flex-col md:flex-row justify-between mt-4">
-                <div className="md:w-1/2 mb-4 md:mb-0 flex flex-col items-center">
-                  <p className="font-semibold mb-2 text-center">
-                    Explore components
-                  </p>
-                  <ul className="list-disc pl-5 space-y-2 inline-block text-left">
-                    {components.map((component, index) => (
-                      <li key={index}>
-                        <a
-                          href={component.url}
-                          className="hover:underline inline-flex items-center dark:text-white text-black"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          {component.name}
-                          <ArrowSvg />
-                        </a>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-                <div className="md:w-1/2 flex flex-col items-center">
-                  <p className="font-semibold mb-2 text-center">
-                    Explore templates
-                  </p>
-                  <ul className="list-disc pl-5 space-y-2 inline-block text-left">
-                    {templates.map((template, index) => (
-                      <li key={index}>
-                        <a
-                          href={template.url}
-                          className="hover:underline inline-flex items-center dark:text-white text-black"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          {template.name}
-                          <ArrowSvg />
-                        </a>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
+      <main className="flex-grow container mx-auto p-4 md:p-6">
+        {!connected ? (
+          <div className="flex flex-col items-center justify-center h-[50vh] gap-6">
+            <div className="max-w-lg text-center">
+              <h2 className="text-3xl font-bold mb-4">Freelance Onchain</h2>
+              <p className="mb-6 text-muted-foreground">
+                Connect your wallet to access the decentralized marketplace for freelancers and clients.
+                Find work, hire talent, and manage projects with the security of blockchain technology.
+              </p>
+              <Wallet>
+                <ConnectWallet className="mx-auto" />
+              </Wallet>
             </div>
           </div>
-        </div>
+        ) : (
+          <Tabs defaultValue="explore" className="w-full">
+            <TabsList className="grid grid-cols-3 mb-8">
+              <TabsTrigger value="explore">Explore Jobs</TabsTrigger>
+              <TabsTrigger value="create">Post a Job</TabsTrigger>
+              <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="explore" className="space-y-4">
+              <JobListingComponent />
+            </TabsContent>
+
+            <TabsContent value="create">
+              <JobCreateForm />
+            </TabsContent>
+
+            <TabsContent value="dashboard">
+              <UserDashboard />
+            </TabsContent>
+          </Tabs>
+        )}
       </main>
+
+      <footer className="border-t py-6">
+        <div className="container mx-auto px-4 text-center text-sm text-muted-foreground">
+          <p>© 2025 BaseLance - Freelance Marketplace on Base Network</p>
+        </div>
+      </footer>
+      <Toaster />
     </div>
   );
 }
