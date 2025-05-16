@@ -1,10 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useAccount, useReadContract, useWriteContract } from 'wagmi';
+import { useState } from 'react';
+import { useAccount, useWriteContract } from 'wagmi';
 import { parseEther, parseAbiItem } from 'viem';
 import { CONTRACT_ABI, CONTRACT_ADDRESS } from '@/lib/contract';
-import { JobStatus, ApplicationStatus } from '@/lib/utils';
 import { publicClient } from '@/lib/client';
 
 // Determine the chain based on environment

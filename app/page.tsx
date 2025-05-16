@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ConnectWallet, Wallet, WalletDropdown, WalletDropdownDisconnect, WalletDropdownBasename } from '@coinbase/onchainkit/wallet';
-import { Identity, Avatar, Name, Badge, Address } from '@coinbase/onchainkit/identity';
+import { Identity, Avatar, Name, Address } from '@coinbase/onchainkit/identity';
 import JobListingComponent from '@/components/JobListing';
 import JobCreateForm from '@/components/JobCreateForm';
 import UserDashboard from '@/components/UserDashboard';
@@ -11,6 +11,8 @@ import AdminPanel from '@/components/AdminPanel';
 import { Toaster } from '@/components/ui/toaster';
 import { useAccount } from 'wagmi';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { NetworkIndicator } from '@/components/ui/network-indicator';
+import { NetworkCheck } from '@/components/ui/network-check';
 
 export default function App() {
   const { isConnected } = useAccount();
@@ -25,8 +27,9 @@ export default function App() {
     <div className="flex flex-col min-h-screen bg-background">
       <header className="border-b">
         <div className="container mx-auto py-4 px-4 flex justify-between items-center">
-          <h1 className="text-2xl font-bold">BaseLance</h1>
+          <h1 className="text-2xl font-bold">Unlocked.</h1>
           <div className="flex items-center gap-4">
+            <NetworkIndicator />
             <ThemeToggle />
             <div className="wallet-container">
               <Wallet>
@@ -50,6 +53,7 @@ export default function App() {
       </header>
 
       <main className="flex-grow container mx-auto p-4 md:p-6">
+        <NetworkCheck />
         {!connected ? (
           <div className="flex flex-col items-center justify-center h-[50vh] gap-6">
             <div className="max-w-lg text-center">
@@ -59,9 +63,9 @@ export default function App() {
                 Find work, hire talent, and manage projects with the security of blockchain technology.
               </p>
             </div>
-              <Wallet>
-                <ConnectWallet className="mx-auto" />
-              </Wallet>
+            <Wallet>
+              <ConnectWallet className="mx-auto" />
+            </Wallet>
           </div>
         ) : (
           <Tabs defaultValue="explore" className="w-full">
@@ -93,7 +97,7 @@ export default function App() {
 
       <footer className="border-t py-6">
         <div className="container mx-auto px-4 text-center text-sm text-muted-foreground">
-          <p>© 2025 BaseLance - Freelance Marketplace on Base Network</p>
+          <p>© 2025 Unlocked. - Freelance Marketplace on Base Network</p>
         </div>
       </footer>
       <Toaster />

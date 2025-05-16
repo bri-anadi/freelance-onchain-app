@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { formatEther, formatAddress, calculateTimeLeft, JobStatus, ApplicationStatus } from '@/lib/utils';
+import { formatEther, calculateTimeLeft, JobStatus, ApplicationStatus } from '@/lib/utils';
 import { useContractRead, useContractWrite } from '@/hooks/useContract';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2 } from 'lucide-react';
