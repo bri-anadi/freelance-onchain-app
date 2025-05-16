@@ -2,76 +2,30 @@
 
 import { useState, useEffect } from 'react';
 import { useAccount } from 'wagmi';
-import { useReadContract } from 'wagmi';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { formatEther, formatAddress, calculateTimeLeft, JobStatus } from '@/lib/utils';
-import { CONTRACT_ABI, CONTRACT_ADDRESS } from '@/lib/contract';
+import { useContractRead, useContractWrite } from '@/hooks/useContract';
+import { useToast } from '@/components/ui/use-toast';
 import { Loader2 } from 'lucide-react';
-
-type Job = {
-  id: number;
-  poster: string;
-  title: string;
-  description: string;
-  reward: bigint;
-  deadline: number;
-  status: number;
-  assignedFreelancer: string;
-};
 
 export default function JobListingComponent() {
   const { address, isConnected } = useAccount();
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedJob, setSelectedJob] = useState<Job | null>(null);
+  const [selectedJob, setSelectedJob] = useState<any | null>(null);
   const [proposal, setProposal] = useState('');
   const [applying, setApplying] = useState(false);
+  const [txHash, setTxHash] = useState<string | null>(null);
+  const { toast } = useToast();
 
-  const chainId = process.env.NEXT_PUBLIC_CHAIN_ID === 'mainnet' ? 'mainnet' : 'testnet';
+  // Use the contract hooks
+  const { jobs, loading, fetchJobs } = useContractRead();
+  const { applyForJob, isWritePending } = useContractWrite();
 
-  // Fetch jobs data
+  // Fetch jobs when component mounts
   useEffect(() => {
-    const fetchJobs = async () => {
-      try {
-        setLoading(true);
-        // In a real app, we would query jobs from the blockchain or an indexer
-        // For demo purposes, we'll simulate with a delay
-        setTimeout(() => {
-          setJobs([
-            {
-              id: 1,
-              poster: '0x123456789abcdef123456789abcdef123456789a',
-              title: 'Build a DeFi Dashboard',
-              description: 'Looking for a developer to build a dashboard for DeFi protocols on Base.',
-              reward: BigInt('1000000000000000000'), // 1 ETH
-              deadline: Math.floor(Date.now() / 1000) + 604800, // 1 week from now
-              status: JobStatus.OPEN,
-              assignedFreelancer: '0x0000000000000000000000000000000000000000',
-            },
-            {
-              id: 2,
-              poster: '0x987654321fedcba987654321fedcba987654321',
-              title: 'Design NFT Collection',
-              description: 'Need a designer to create a collection of 10 NFTs for a new project.',
-              reward: BigInt('500000000000000000'), // 0.5 ETH
-              deadline: Math.floor(Date.now() / 1000) + 1209600, // 2 weeks from now
-              status: JobStatus.OPEN,
-              assignedFreelancer: '0x0000000000000000000000000000000000000000',
-            },
-          ]);
-          setLoading(false);
-        }, 1000);
-      } catch (error) {
-        console.error('Error fetching jobs:', error);
-        setLoading(false);
-      }
-    };
-
     fetchJobs();
   }, []);
 
@@ -80,28 +34,42 @@ export default function JobListingComponent() {
 
     try {
       setApplying(true);
-      // In a real app, we would call the contract method
-      console.log(`Applying for job ${jobId} with proposal: ${proposal}`);
+      // Call contract method to apply for job
+      const hash = await applyForJob(jobId, proposal);
+      if (typeof hash === 'string') {
+        setTxHash(hash);
+      }
 
-      // Simulate blockchain delay
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
+      // Reset form and close dialog on success
       setApplying(false);
       setSelectedJob(null);
       setProposal('');
+
       // Show success message
-      alert('Application submitted successfully!');
+      toast({
+        title: "Application Submitted",
+        description: typeof hash === 'string' ? `Your application has been submitted successfully. Transaction hash: ${hash}` : "Your application has been submitted successfully.",
+      });
     } catch (error) {
       console.error('Error applying for job:', error);
       setApplying(false);
+      toast({
+        title: "Application Failed",
+        description: "There was an error submitting your application. Please try again.",
+        variant: "destructive"
+      });
     }
+  };
+
+  const refreshJobs = () => {
+    fetchJobs();
   };
 
   if (loading) {
     return (
       <div className="flex justify-center items-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <span className="ml-2">Loading jobs...</span>
+        <span className="ml-2">Loading jobs from blockchain...</span>
       </div>
     );
   }
@@ -112,6 +80,10 @@ export default function JobListingComponent() {
         <h2 className="text-2xl font-bold">Available Jobs</h2>
         <div className="flex gap-2">
           <Badge variant="outline">{jobs.length} jobs found</Badge>
+          <Button variant="outline" size="sm" onClick={refreshJobs} disabled={loading}>
+            <Loader2 className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : 'hidden'}`} />
+            Refresh
+          </Button>
         </div>
       </div>
 
@@ -121,8 +93,19 @@ export default function JobListingComponent() {
             <CardHeader>
               <div className="flex justify-between items-start">
                 <CardTitle className="text-xl">{job.title}</CardTitle>
-                <Badge variant={job.status === JobStatus.OPEN ? "default" : "secondary"}>
-                  {job.status === JobStatus.OPEN ? "Open" : "Assigned"}
+                <Badge variant={
+                  job.status === JobStatus.OPEN ? "default" :
+                  job.status === JobStatus.COMPLETED ? "success" :
+                  job.status === JobStatus.CANCELLED ? "destructive" :
+                  job.status === JobStatus.AI_VERIFIED ? "default" :
+                  "secondary"
+                }>
+                  {job.status === JobStatus.OPEN ? "Open" :
+                   job.status === JobStatus.ASSIGNED ? "Assigned" :
+                   job.status === JobStatus.SUBMITTED ? "Submitted" :
+                   job.status === JobStatus.AI_VERIFIED ? "AI Verified" :
+                   job.status === JobStatus.COMPLETED ? "Completed" :
+                   "Cancelled"}
                 </Badge>
               </div>
               <CardDescription>Posted by {formatAddress(job.poster)}</CardDescription>
@@ -176,6 +159,7 @@ export default function JobListingComponent() {
                               value={proposal}
                               onChange={(e) => setProposal(e.target.value)}
                               className="mb-4"
+                              disabled={applying || isWritePending}
                             />
                           </div>
                         )}
@@ -184,9 +168,9 @@ export default function JobListingComponent() {
                         {isConnected && selectedJob.status === JobStatus.OPEN && selectedJob.poster !== address ? (
                           <Button
                             onClick={() => handleApply(selectedJob.id)}
-                            disabled={applying || !proposal.trim()}
+                            disabled={applying || !proposal.trim() || isWritePending}
                           >
-                            {applying && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            {(applying || isWritePending) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             Apply for this Job
                           </Button>
                         ) : (
@@ -207,10 +191,10 @@ export default function JobListingComponent() {
         ))}
       </div>
 
-      {jobs.length === 0 && (
-        <div className="text-center py-12">
+      {jobs.length === 0 && !loading && (
+        <div className="text-center py-12 border rounded-md">
           <h3 className="text-lg font-medium">No jobs found</h3>
-          <p className="text-muted-foreground">Check back later for new opportunities</p>
+          <p className="text-muted-foreground">There are no jobs available right now. Be the first to post a job!</p>
         </div>
       )}
     </div>

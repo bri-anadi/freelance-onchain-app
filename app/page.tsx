@@ -37,7 +37,6 @@ export default function App() {
                 <WalletDropdown>
                   <Identity className="px-4 pt-3 pb-2" hasCopyAddressOnClick>
                     <Avatar />
-                    {/* Simplified structure to avoid tag issues */}
                     <Name />
                     <Address />
                   </Identity>
@@ -59,10 +58,10 @@ export default function App() {
                 Connect your wallet to access the decentralized marketplace for freelancers and clients.
                 Find work, hire talent, and manage projects with the security of blockchain technology.
               </p>
+            </div>
               <Wallet>
                 <ConnectWallet className="mx-auto" />
               </Wallet>
-            </div>
           </div>
         ) : (
           <Tabs defaultValue="explore" className="w-full">

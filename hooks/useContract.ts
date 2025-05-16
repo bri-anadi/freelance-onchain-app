@@ -1,10 +1,11 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
-import { parseEther } from 'viem';
+import { useAccount, useReadContract, useWriteContract } from 'wagmi';
+import { parseEther, parseAbiItem } from 'viem';
 import { CONTRACT_ABI, CONTRACT_ADDRESS } from '@/lib/contract';
 import { JobStatus, ApplicationStatus } from '@/lib/utils';
+import { publicClient } from '@/lib/client';
 
 // Determine the chain based on environment
 const getContractAddress = () => {
@@ -17,199 +18,326 @@ export function useContractRead() {
   const [jobs, setJobs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Fetch all jobs
+  const fetchJobs = async () => {
+    if (!isConnected) return;
+
+    try {
+      setLoading(true);
+
+      // Fetch JobCreated events to get all job IDs
+      const jobEvents = await publicClient.getLogs({
+        address: getContractAddress(),
+        event: parseAbiItem('event JobCreated(uint256 indexed jobId, address indexed poster, uint256 reward)'),
+        fromBlock: 'earliest',
+        toBlock: 'latest',
+      });
+
+      const fetchedJobs = [];
+
+      for (const event of jobEvents) {
+        if (event.args && event.args.jobId !== undefined) {
+          try {
+            const jobId = Number(event.args.jobId);
+            const jobDetails = await publicClient.readContract({
+              address: getContractAddress(),
+              abi: CONTRACT_ABI,
+              functionName: 'getJobDetails',
+              args: [jobId],
+            });
+
+            if (jobDetails) {
+              const [poster, title, description, reward, deadline, status, assignedFreelancer] = jobDetails as [string, string, string, bigint, bigint, number, string];
+              fetchedJobs.push({
+                id: jobId,
+                poster,
+                title,
+                description,
+                reward,
+                deadline: Number(deadline),
+                status,
+                assignedFreelancer
+              });
+            }
+          } catch (error) {
+            console.error(`Error fetching job details for job ID ${event.args.jobId}:`, error);
+          }
+        }
+      }
+
+      setJobs(fetchedJobs);
+      setLoading(false);
+    } catch (error) {
+      console.error('Error fetching jobs:', error);
+      setLoading(false);
+      setJobs([]);
+    }
+  };
+
   // Get job by ID
   const getJob = async (jobId: number) => {
     try {
-      // Para este ejemplo, usamos datos simulados
-      // En una app real, usarías readContract de viem directamente (no useReadContract)
-      return {
-        id: jobId,
-        poster: '0x123456789abcdef123456789abcdef123456789a',
-        title: 'Example Job',
-        description: 'This is an example job description',
-        reward: BigInt('1000000000000000000'),
-        deadline: Math.floor(Date.now() / 1000) + 604800,
-        status: JobStatus.OPEN,
-        assignedFreelancer: '0x0000000000000000000000000000000000000000'
-      };
+      const result = await publicClient.readContract({
+        address: getContractAddress(),
+        abi: CONTRACT_ABI,
+        functionName: 'getJobDetails',
+        args: [jobId],
+      });
+
+      if (result) {
+        const [poster, title, description, reward, deadline, status, assignedFreelancer] = result as [string, string, string, bigint, bigint, number, string];
+        return {
+          id: jobId,
+          poster,
+          title,
+          description,
+          reward,
+          deadline: Number(deadline),
+          status,
+          assignedFreelancer
+        };
+      }
+      return null;
     } catch (error) {
       console.error('Error getting job details:', error);
       throw error;
     }
   };
 
-  // Fetch all jobs (in a real app, this would use events or an indexer)
-  const fetchJobs = async () => {
-    if (!isConnected) return;
-
-    try {
-      setLoading(true);
-      // In a real app, you would fetch from an indexer or scan events
-      // For this demo, we're simulating data
-      setTimeout(() => {
-        const mockJobs = [
-          {
-            id: 1,
-            poster: '0x123456789abcdef123456789abcdef123456789a',
-            title: 'Build a DeFi Dashboard',
-            description: 'Looking for a developer to build a dashboard for DeFi protocols on Base.',
-            reward: BigInt('1000000000000000000'), // 1 ETH
-            deadline: Math.floor(Date.now() / 1000) + 604800, // 1 week from now
-            status: JobStatus.OPEN,
-            assignedFreelancer: '0x0000000000000000000000000000000000000000',
-          },
-          {
-            id: 2,
-            poster: '0x987654321fedcba987654321fedcba987654321',
-            title: 'Design NFT Collection',
-            description: 'Need a designer to create a collection of 10 NFTs for a new project.',
-            reward: BigInt('500000000000000000'), // 0.5 ETH
-            deadline: Math.floor(Date.now() / 1000) + 1209600, // 2 weeks from now
-            status: JobStatus.OPEN,
-            assignedFreelancer: '0x0000000000000000000000000000000000000000',
-          },
-        ];
-        setJobs(mockJobs);
-        setLoading(false);
-      }, 1000);
-    } catch (error) {
-      console.error('Error fetching jobs:', error);
-      setLoading(false);
-    }
-  };
-
   // Get job applications
   const getJobApplications = async (jobId: number) => {
     try {
-      // Datos simulados para el ejemplo
-      return [
-        {
-          id: 1,
-          jobId,
-          freelancer: '0x1234567890abcdef1234567890abcdef12345678',
-          proposal: 'I have experience with this kind of project and can deliver it on time.',
-          status: ApplicationStatus.PENDING,
-          timestamp: Math.floor(Date.now() / 1000) - 86400
-        },
-        {
-          id: 2,
-          jobId,
-          freelancer: '0x2345678901abcdef2345678901abcdef23456789',
-          proposal: 'I would love to work on this project. I have similar experience.',
-          status: ApplicationStatus.PENDING,
-          timestamp: Math.floor(Date.now() / 1000) - 172800
+      const applicationIds = await publicClient.readContract({
+        address: getContractAddress(),
+        abi: CONTRACT_ABI,
+        functionName: 'getJobApplications',
+        args: [jobId],
+      }) as bigint[];
+
+      const applications = [];
+      for (const appId of applicationIds) {
+        const application = await publicClient.readContract({
+          address: getContractAddress(),
+          abi: CONTRACT_ABI,
+          functionName: 'applications',
+          args: [appId],
+        });
+
+        if (application) {
+          // Extract data and convert types appropriately
+          const [id, jobId, freelancer, proposal, status, timestamp] = application as [bigint, bigint, string, string, number, bigint];
+          applications.push({
+            id: Number(id),
+            jobId: Number(jobId),
+            freelancer,
+            proposal,
+            status,
+            timestamp: Number(timestamp)
+          });
         }
-      ];
+      }
+      return applications;
     } catch (error) {
       console.error('Error getting job applications:', error);
-      throw error;
+      return [];
     }
   };
 
   // Get submission by ID
   const getSubmission = async (submissionId: number) => {
     try {
-      // Datos simulados para el ejemplo
-      return {
-        id: submissionId,
-        jobId: 1,
-        freelancer: '0x1234567890abcdef1234567890abcdef12345678',
-        deliverable: 'I have completed the project. You can view it at https://example.com/project',
-        aiVerified: false,
-        posterApproved: false,
-        timestamp: Math.floor(Date.now() / 1000) - 43200
-      };
+      const result = await publicClient.readContract({
+        address: getContractAddress(),
+        abi: CONTRACT_ABI,
+        functionName: 'getSubmissionDetails',
+        args: [submissionId],
+      });
+
+      if (result) {
+        const [jobId, freelancer, deliverable, aiVerified, posterApproved, timestamp] = result as [bigint, string, string, boolean, boolean, bigint];
+        return {
+          id: submissionId,
+          jobId: Number(jobId),
+          freelancer,
+          deliverable,
+          aiVerified,
+          posterApproved,
+          timestamp: Number(timestamp)
+        };
+      }
+      return null;
     } catch (error) {
       console.error('Error getting submission details:', error);
-      throw error;
+      return null;
     }
   };
 
   // Get job submission by job ID
   const getJobSubmission = async (jobId: number) => {
     try {
-      // Datos simulados para el ejemplo
-      return {
-        id: 1,
-        jobId,
-        freelancer: '0x1234567890abcdef1234567890abcdef12345678',
-        deliverable: 'I have completed the project. You can view it at https://example.com/project',
-        aiVerified: false,
-        posterApproved: false,
-        timestamp: Math.floor(Date.now() / 1000) - 43200
-      };
+      const submissionId = await publicClient.readContract({
+        address: getContractAddress(),
+        abi: CONTRACT_ABI,
+        functionName: 'jobToSubmission',
+        args: [jobId],
+      }) as bigint;
+
+      if (submissionId && submissionId > BigInt(0)) {
+        return getSubmission(Number(submissionId));
+      }
+      return null;
     } catch (error) {
       console.error('Error getting job submission:', error);
-      throw error;
+      return null;
     }
   };
 
-  // Get user submitted applications (in a real app, this would filter events by user address)
-  const getUserApplications = async (address: string) => {
-    // In a real app, you would query events or use an indexer
-    // For this demo, we're returning mock data
-    const mockApplications = [
-      {
-        id: 1,
-        jobId: 1,
-        jobTitle: 'Build a DeFi Dashboard',
-        proposal: 'I have 3 years of experience building DeFi interfaces and can deliver this dashboard in 5 days.',
-        status: ApplicationStatus.PENDING,
-        timestamp: Math.floor(Date.now() / 1000) - 86400, // 1 day ago
-      },
-      {
-        id: 2,
-        jobId: 2,
-        jobTitle: 'Design NFT Collection',
-        proposal: 'I am a professional designer specializing in NFT art and can create a unique collection for your project.',
-        status: ApplicationStatus.ACCEPTED,
-        timestamp: Math.floor(Date.now() / 1000) - 172800, // 2 days ago
-      },
-    ];
-    return mockApplications;
+  // Get user submitted applications
+  const getUserApplications = async (userAddress: string) => {
+    try {
+      // Mencari events ApplicationSubmitted yang difilter berdasarkan alamat freelancer
+      const applicationEvents = await publicClient.getLogs({
+        address: getContractAddress(),
+        event: parseAbiItem('event ApplicationSubmitted(uint256 indexed applicationId, uint256 indexed jobId, address indexed freelancer)'),
+        fromBlock: 'earliest',
+        toBlock: 'latest',
+        args: {
+          freelancer: userAddress as `0x${string}`
+        }
+      });
+
+      const applications = [];
+
+      for (const event of applicationEvents) {
+        if (event.args && event.args.applicationId !== undefined) {
+          try {
+            const applicationId = Number(event.args.applicationId);
+            const application = await publicClient.readContract({
+              address: getContractAddress(),
+              abi: CONTRACT_ABI,
+              functionName: 'applications',
+              args: [applicationId],
+            });
+
+            if (application) {
+              const [id, jobId, freelancer, proposal, status, timestamp] = application as [bigint, bigint, string, string, number, bigint];
+
+              // Mendapatkan judul pekerjaan
+              const job = await getJob(Number(jobId));
+
+              applications.push({
+                id: Number(id),
+                jobId: Number(jobId),
+                jobTitle: job ? job.title : `Job #${jobId}`,
+                proposal,
+                status,
+                timestamp: Number(timestamp)
+              });
+            }
+          } catch (error) {
+            console.error(`Error fetching application details for ID ${event.args.applicationId}:`, error);
+          }
+        }
+      }
+
+      return applications;
+    } catch (error) {
+      console.error('Error getting user applications:', error);
+      return [];
+    }
   };
 
-  // Get user posted jobs (in a real app, this would filter jobs by poster address)
-  const getUserPostedJobs = async (address: string) => {
-    // In a real app, you would query events or use an indexer
-    // For this demo, we're returning mock data
-    const mockPostedJobs = [
-      {
-        id: 3,
-        title: 'Develop Solidity Smart Contract',
-        description: 'Need a developer to write a custom smart contract for a DAO.',
-        reward: BigInt('2000000000000000000'), // 2 ETH
-        deadline: Math.floor(Date.now() / 1000) + 604800, // 1 week from now
-        status: JobStatus.OPEN,
-      },
-    ];
-    return mockPostedJobs;
+  // Get user posted jobs
+  const getUserPostedJobs = async (userAddress: string) => {
+    try {
+      // Mencari events JobCreated yang difilter berdasarkan alamat poster
+      const jobEvents = await publicClient.getLogs({
+        address: getContractAddress(),
+        event: parseAbiItem('event JobCreated(uint256 indexed jobId, address indexed poster, uint256 reward)'),
+        fromBlock: 'earliest',
+        toBlock: 'latest',
+        args: {
+          poster: userAddress as `0x${string}`
+        }
+      });
+
+      const postedJobs = [];
+
+      for (const event of jobEvents) {
+        if (event.args && event.args.jobId !== undefined) {
+          try {
+            const jobId = Number(event.args.jobId);
+            const job = await getJob(jobId);
+            if (job) {
+              postedJobs.push(job);
+            }
+          } catch (error) {
+            console.error(`Error fetching job details for ID ${event.args.jobId}:`, error);
+          }
+        }
+      }
+
+      return postedJobs;
+    } catch (error) {
+      console.error('Error getting user posted jobs:', error);
+      return [];
+    }
   };
 
-  // Get user submissions (in a real app, this would filter submissions by freelancer address)
-  const getUserSubmissions = async (address: string) => {
-    // In a real app, you would query events or use an indexer
-    // For this demo, we're returning mock data
-    const mockSubmissions = [
-      {
-        id: 1,
-        jobId: 2,
-        jobTitle: 'Design NFT Collection',
-        deliverable: 'I have completed the 10 NFT designs as requested. You can view them at https://example.com/nft-designs',
-        aiVerified: true,
-        posterApproved: false,
-        timestamp: Math.floor(Date.now() / 1000) - 43200, // 12 hours ago
-      },
-    ];
-    return mockSubmissions;
+  // Get user submissions
+  const getUserSubmissions = async (userAddress: string) => {
+    try {
+      // Mencari events WorkSubmitted yang difilter berdasarkan alamat freelancer
+      const submissionEvents = await publicClient.getLogs({
+        address: getContractAddress(),
+        event: parseAbiItem('event WorkSubmitted(uint256 indexed submissionId, uint256 indexed jobId, address indexed freelancer)'),
+        fromBlock: 'earliest',
+        toBlock: 'latest',
+        args: {
+          freelancer: userAddress as `0x${string}`
+        }
+      });
+
+      const submissions = [];
+
+      for (const event of submissionEvents) {
+        if (event.args && event.args.submissionId !== undefined) {
+          try {
+            const submissionId = Number(event.args.submissionId);
+            const submission = await getSubmission(submissionId);
+
+            if (submission) {
+              // Mendapatkan judul pekerjaan
+              const job = await getJob(Number(submission.jobId));
+
+              submissions.push({
+                ...submission,
+                jobTitle: job ? job.title : `Job #${submission.jobId}`
+              });
+            }
+          } catch (error) {
+            console.error(`Error fetching submission details for ID ${event.args.submissionId}:`, error);
+          }
+        }
+      }
+
+      return submissions;
+    } catch (error) {
+      console.error('Error getting user submissions:', error);
+      return [];
+    }
   };
 
   // Check if user is contract owner
   const isContractOwner = async () => {
     try {
-      // Datos simulados para el ejemplo
-      // En una app real, compararías la dirección del usuario con la del propietario del contrato
-      return address === '0x0000000000000000000000000000000000000001';
+      const owner = await publicClient.readContract({
+        address: getContractAddress(),
+        abi: CONTRACT_ABI,
+        functionName: 'owner',
+      }) as string;
+
+      return owner.toLowerCase() === address?.toLowerCase();
     } catch (error) {
       console.error('Error checking if user is owner:', error);
       return false;
@@ -219,22 +347,32 @@ export function useContractRead() {
   // Get platform fee percentage
   const getPlatformFee = async () => {
     try {
-      // Datos simulados para el ejemplo
-      return 2.5; // 2.5%
+      const feeBps = await publicClient.readContract({
+        address: getContractAddress(),
+        abi: CONTRACT_ABI,
+        functionName: 'platformFeeBps',
+      }) as bigint;
+
+      return Number(feeBps) / 100; // Convert basis points to percentage
     } catch (error) {
       console.error('Error getting platform fee:', error);
-      return 2.5; // Default 2.5%
+      return 0; // Return 0 on error
     }
   };
 
   // Get AI verification release percentage
   const getAIVerificationReleaseBps = async () => {
     try {
-      // Datos simulados para el ejemplo
-      return 70; // 70%
+      const releaseBps = await publicClient.readContract({
+        address: getContractAddress(),
+        abi: CONTRACT_ABI,
+        functionName: 'aiVerificationReleaseBps',
+      }) as bigint;
+
+      return Number(releaseBps) / 100; // Convert basis points to percentage
     } catch (error) {
       console.error('Error getting AI verification release percentage:', error);
-      return 70; // Default 70%
+      return 0; // Return 0 on error
     }
   };
 

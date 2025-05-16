@@ -15,37 +15,40 @@ import {
 } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { formatEther, formatAddress, JobStatus } from '@/lib/utils';
 import { useContractRead, useContractWrite } from '@/hooks/useContract';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, CheckCircle, XCircle } from 'lucide-react';
+import { publicClient } from '@/lib/client';
+import { parseAbiItem } from 'viem';
 
 export default function AdminPanel() {
   const { address, isConnected } = useAccount();
   const [isOwner, setIsOwner] = useState(false);
   const [loadingOwner, setLoadingOwner] = useState(true);
-  const [platformFee, setPlatformFee] = useState(2.5);
-  const [aiReleaseBps, setAiReleaseBps] = useState(70);
+  const [platformFee, setPlatformFee] = useState(0);
+  const [aiReleaseBps, setAiReleaseBps] = useState(0);
   const [newFee, setNewFee] = useState('');
   const [newReleaseBps, setNewReleaseBps] = useState('');
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [loadingSubmissions, setLoadingSubmissions] = useState(true);
   const [selectedSubmission, setSelectedSubmission] = useState<any | null>(null);
+  const [verificationStats, setVerificationStats] = useState({
+    pending: 0,
+    today: 0,
+    total: 0,
+    successRate: 0
+  });
   const { toast } = useToast();
 
   // Use contract hooks
   const {
     isContractOwner,
     getPlatformFee,
-    getAIVerificationReleaseBps
+    getAIVerificationReleaseBps,
+    getJob,
+    getSubmission
   } = useContractRead();
 
   const {
@@ -54,6 +57,13 @@ export default function AdminPanel() {
     updateAIVerificationReleaseBps,
     isWritePending
   } = useContractWrite();
+
+  const getContractAddress = () => {
+    const chainId = process.env.NEXT_PUBLIC_CHAIN_ID;
+    return chainId === 'mainnet' ?
+      '0xB2295D19D18011F0FEC919c7e2427cB024e91ef7' :
+      '0x553af81FCd141bA428bc93b345B9E91A81D4641C';
+  };
 
   // Check if user is owner
   useEffect(() => {
@@ -86,56 +96,114 @@ export default function AdminPanel() {
     checkOwner();
   }, [isConnected]);
 
-  // Fetch pending submissions
+  // Fetch pending submissions and stats
   useEffect(() => {
-    const fetchSubmissions = async () => {
+    const fetchSubmissionsAndStats = async () => {
       if (!isOwner) return;
 
       try {
         setLoadingSubmissions(true);
 
-        // In a real app, this would query all submissions with status SUBMITTED
-        // For this demo, we're simulating with mock data
-        setTimeout(() => {
-          const mockSubmissions = [
-            {
-              id: 1,
-              jobId: 2,
-              job: {
-                title: 'Design NFT Collection',
-                poster: '0xa1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4',
-              },
-              freelancer: '0x1234567890abcdef1234567890abcdef12345678',
-              deliverable: 'I have completed the 10 NFT designs as requested. You can view them at https://example.com/nft-designs',
-              aiVerified: false,
-              posterApproved: false,
-              timestamp: Math.floor(Date.now() / 1000) - 86400,
-            },
-            {
-              id: 2,
-              jobId: 3,
-              job: {
-                title: 'Develop API Integration',
-                poster: '0xb2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4e5f',
-              },
-              freelancer: '0x2345678901abcdef2345678901abcdef23456789',
-              deliverable: 'API integration is complete. Documentation and code are available at https://github.com/username/api-integration',
-              aiVerified: false,
-              posterApproved: false,
-              timestamp: Math.floor(Date.now() / 1000) - 172800,
-            },
-          ];
+        // Fetch all WorkSubmitted events
+        const submissionEvents = await publicClient.getLogs({
+          address: getContractAddress() as `0x${string}`,
+          event: parseAbiItem('event WorkSubmitted(uint256 indexed submissionId, uint256 indexed jobId, address indexed freelancer)'),
+          fromBlock: 'earliest',
+          toBlock: 'latest',
+        });
 
-          setSubmissions(mockSubmissions);
-          setLoadingSubmissions(false);
-        }, 1000);
+        // Fetch all WorkVerifiedByAI events to calculate stats
+        const verificationEvents = await publicClient.getLogs({
+          address: getContractAddress() as `0x${string}`,
+          event: parseAbiItem('event WorkVerifiedByAI(uint256 indexed submissionId, uint256 indexed jobId, address indexed freelancer)'),
+          fromBlock: 'earliest',
+          toBlock: 'latest',
+        });
+
+        const pendingSubmissions = [];
+        let totalSubmissions = submissionEvents.length;
+        let verifiedToday = 0;
+        let totalVerified = verificationEvents.length;
+
+        // Calculate today's verifications
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const todayTimestamp = Math.floor(today.getTime() / 1000);
+
+        for (const event of verificationEvents) {
+          if (event.blockNumber) {
+            const block = await publicClient.getBlock({ blockNumber: event.blockNumber });
+            if (Number(block.timestamp) > todayTimestamp) {
+              verifiedToday++;
+            }
+          }
+        }
+
+        // Map of submissions that have been verified (by ID)
+        const verifiedSubmissions = new Map();
+        for (const event of verificationEvents) {
+          if (event.args && event.args.submissionId) {
+            verifiedSubmissions.set(Number(event.args.submissionId), true);
+          }
+        }
+
+        // Get pending submissions (not verified by AI)
+        for (const event of submissionEvents) {
+          if (event.args && event.args.submissionId !== undefined) {
+            const submissionId = Number(event.args.submissionId);
+
+            // Skip if already verified
+            if (verifiedSubmissions.has(submissionId)) {
+              continue;
+            }
+
+            try {
+              const submission = await getSubmission(submissionId);
+
+              if (submission && !submission.aiVerified) {
+                const jobId = Number(event.args.jobId);
+                const job = await getJob(jobId);
+
+                pendingSubmissions.push({
+                  id: submissionId,
+                  jobId,
+                  job: {
+                    title: job ? job.title : `Job #${jobId}`,
+                    poster: job ? job.poster : '',
+                  },
+                  freelancer: submission.freelancer,
+                  deliverable: submission.deliverable,
+                  aiVerified: submission.aiVerified,
+                  posterApproved: submission.posterApproved,
+                  timestamp: submission.timestamp,
+                });
+              }
+            } catch (error) {
+              console.error(`Error fetching submission details for ID ${submissionId}:`, error);
+            }
+          }
+        }
+
+        // Calculate success rate
+        const successRate = totalSubmissions > 0 ? (totalVerified / totalSubmissions) * 100 : 0;
+
+        setSubmissions(pendingSubmissions);
+        setVerificationStats({
+          pending: pendingSubmissions.length,
+          today: verifiedToday,
+          total: totalVerified,
+          successRate: Math.round(successRate)
+        });
+
+        setLoadingSubmissions(false);
       } catch (error) {
         console.error('Error fetching submissions:', error);
+        setSubmissions([]);
         setLoadingSubmissions(false);
       }
     };
 
-    fetchSubmissions();
+    fetchSubmissionsAndStats();
   }, [isOwner]);
 
   // Handle AI verification
@@ -148,9 +216,7 @@ export default function AdminPanel() {
 
       // Update submissions list (optimistic update)
       setSubmissions(prev =>
-        prev.map(sub =>
-          sub.id === submissionId ? { ...sub, aiVerified: verified } : sub
-        )
+        prev.filter(sub => sub.id !== submissionId)
       );
 
       setSelectedSubmission(null);
@@ -160,6 +226,14 @@ export default function AdminPanel() {
         title: verified ? 'Work Verified Successfully' : 'Work Rejected',
         description: typeof hash === 'string' ? `Transaction hash: ${hash}` : 'Transaction submitted',
       });
+
+      // Update stats
+      setVerificationStats(prev => ({
+        ...prev,
+        pending: prev.pending - 1,
+        today: prev.today + 1,
+        total: prev.total + 1,
+      }));
     } catch (error) {
       console.error('Error verifying work:', error);
       toast({
@@ -353,19 +427,19 @@ export default function AdminPanel() {
             <div className="grid grid-cols-2 gap-4">
               <div className="bg-muted p-4 rounded-lg">
                 <h3 className="text-sm font-medium mb-1">Pending Verifications</h3>
-                <p className="text-2xl font-bold">{submissions.filter(s => !s.aiVerified).length}</p>
+                <p className="text-2xl font-bold">{verificationStats.pending}</p>
               </div>
               <div className="bg-muted p-4 rounded-lg">
                 <h3 className="text-sm font-medium mb-1">Verified Today</h3>
-                <p className="text-2xl font-bold">3</p>
+                <p className="text-2xl font-bold">{verificationStats.today}</p>
               </div>
               <div className="bg-muted p-4 rounded-lg">
                 <h3 className="text-sm font-medium mb-1">Total Verified</h3>
-                <p className="text-2xl font-bold">42</p>
+                <p className="text-2xl font-bold">{verificationStats.total}</p>
               </div>
               <div className="bg-muted p-4 rounded-lg">
                 <h3 className="text-sm font-medium mb-1">Success Rate</h3>
-                <p className="text-2xl font-bold">94%</p>
+                <p className="text-2xl font-bold">{verificationStats.successRate}%</p>
               </div>
             </div>
           </CardContent>
@@ -485,7 +559,8 @@ export default function AdminPanel() {
             </div>
           ) : (
             <div className="text-center py-8 border rounded-md">
-              <p className="text-muted-foreground">No pending verifications</p>
+              <h3 className="text-lg font-medium mb-2">No pending verifications</h3>
+              <p className="text-muted-foreground">There are no submissions waiting for AI verification</p>
             </div>
           )}
         </>

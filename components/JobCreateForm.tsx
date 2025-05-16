@@ -1,16 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAccount } from 'wagmi';
-import { useWriteContract } from 'wagmi';
-import { parseEther } from 'viem';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Loader2 } from 'lucide-react';
-import { CONTRACT_ABI, CONTRACT_ADDRESS } from '@/lib/contract';
+import { useContractWrite, useContractRead } from '@/hooks/useContract';
+import { useToast } from '@/components/ui/use-toast';
 
 export default function JobCreateForm() {
   const { address, isConnected } = useAccount();
@@ -18,40 +17,90 @@ export default function JobCreateForm() {
   const [description, setDescription] = useState('');
   const [reward, setReward] = useState('');
   const [deadline, setDeadline] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [txHash, setTxHash] = useState<string | null>(null);
+  const [txSubmitted, setTxSubmitted] = useState(false);
+  const { toast } = useToast();
 
-  const chainId = process.env.NEXT_PUBLIC_CHAIN_ID === 'mainnet' ? 'mainnet' : 'testnet';
+  // Use the contract hooks
+  const { getPlatformFee } = useContractRead();
+  const { createJob, isWritePending } = useContractWrite();
+  const [platformFee, setPlatformFee] = useState<number | null>(null);
+
+  // Fetch platform fee on component mount
+  useEffect(() => {  // Changed from useState to useEffect
+    const fetchPlatformFee = async () => {
+      try {
+        const fee = await getPlatformFee();
+        setPlatformFee(fee);
+      } catch (error) {
+        console.error('Error fetching platform fee:', error);
+        setPlatformFee(2.5); // Default value if fetch fails
+      }
+    };
+
+    fetchPlatformFee();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isConnected || !title || !description || !reward || !deadline) return;
 
     try {
-      setIsSubmitting(true);
-      // In a real app, we would call the contract method
-      console.log('Creating job with:', {
-        title,
-        description,
-        reward: parseEther(reward),
-        deadline: Math.floor(new Date(deadline).getTime() / 1000),
-      });
+      setTxSubmitted(true);
 
-      // Simulate blockchain delay
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Convert deadline to unix timestamp
+      const deadlineTimestamp = Math.floor(new Date(deadline).getTime() / 1000);
 
-      // Reset form
-      setTitle('');
-      setDescription('');
-      setReward('');
-      setDeadline('');
-      setIsSubmitting(false);
+      // Call contract method to create a job
+      const hash = await createJob(title, description, deadlineTimestamp, reward);
+
+      // Only set hash if it's a string
+      if (typeof hash === 'string') {
+        setTxHash(hash);
+      }
 
       // Show success message
-      alert('Job created successfully!');
+      toast({
+        title: 'Job Creation Submitted',
+        description: `Your job is being created on the blockchain. ${typeof hash === 'string' ? `Transaction hash: ${hash}` : ''}`,
+      });
+
+      // Wait a moment to show the success state
+      setTimeout(() => {
+        // Reset form
+        setTitle('');
+        setDescription('');
+        setReward('');
+        setDeadline('');
+        setTxSubmitted(false);
+
+        // Show final success message
+        toast({
+          title: 'Job Created Successfully',
+          description: 'Your job has been posted to the blockchain and is now available for freelancers.',
+          variant: 'default',
+        });
+      }, 2000);
     } catch (error) {
       console.error('Error creating job:', error);
-      setIsSubmitting(false);
+      setTxSubmitted(false);
+
+      // Show error message
+      toast({
+        title: 'Error Creating Job',
+        description: 'There was an error creating your job. Please check your connection and try again.',
+        variant: 'destructive',
+      });
     }
+  };
+
+  // Calculate transaction fee
+  const calculateTotalCost = () => {
+    if (!reward || parseFloat(reward) <= 0) return '0';
+    const rewardValue = parseFloat(reward);
+    const feePercentage = platformFee !== null ? platformFee : 2.5;
+    const fee = (rewardValue * feePercentage) / 100;
+    return (rewardValue + fee).toFixed(6);
   };
 
   // Calculate minimum date for deadline (tomorrow)
@@ -87,6 +136,7 @@ export default function JobCreateForm() {
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               required
+              disabled={isWritePending || txSubmitted}
             />
           </div>
 
@@ -99,6 +149,7 @@ export default function JobCreateForm() {
               onChange={(e) => setDescription(e.target.value)}
               className="min-h-[150px]"
               required
+              disabled={isWritePending || txSubmitted}
             />
           </div>
 
@@ -114,6 +165,7 @@ export default function JobCreateForm() {
                 value={reward}
                 onChange={(e) => setReward(e.target.value)}
                 required
+                disabled={isWritePending || txSubmitted}
               />
             </div>
 
@@ -126,23 +178,51 @@ export default function JobCreateForm() {
                 value={deadline}
                 onChange={(e) => setDeadline(e.target.value)}
                 required
+                disabled={isWritePending || txSubmitted}
               />
             </div>
           </div>
 
+          {/* Fee and total cost information */}
+          {reward && parseFloat(reward) > 0 && (
+            <div className="text-sm border rounded-md p-4 bg-muted/50">
+              <div className="flex justify-between mb-2">
+                <span>Job Reward:</span>
+                <span className="font-medium">{reward} ETH</span>
+              </div>
+              <div className="flex justify-between mb-2">
+                <span>Platform Fee ({platformFee !== null ? platformFee : 2.5}%):</span>
+                <span className="font-medium">{((parseFloat(reward) * (platformFee !== null ? platformFee : 2.5)) / 100).toFixed(6)} ETH</span>
+              </div>
+              <div className="border-t pt-2 mt-2 flex justify-between font-semibold">
+                <span>Total Cost:</span>
+                <span>{calculateTotalCost()} ETH</span>
+              </div>
+            </div>
+          )}
+
           <Button
             type="submit"
             className="w-full"
-            disabled={isSubmitting || !title || !description || !reward || !deadline}
+            disabled={isWritePending || txSubmitted || !title || !description || !reward || !deadline}
           >
-            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Post Job
+            {(isWritePending || txSubmitted) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {txSubmitted ? 'Creating Job...' : 'Post Job'}
           </Button>
+
+          {txHash && (
+            <div className="mt-4 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-900 rounded-md">
+              <p className="text-green-700 dark:text-green-300 text-sm font-medium">Job creation transaction submitted!</p>
+              <p className="text-xs text-green-600 dark:text-green-400 break-all mt-1">
+                Transaction hash: {txHash}
+              </p>
+            </div>
+          )}
         </form>
       </CardContent>
       <CardFooter className="flex justify-between text-sm text-muted-foreground">
         <p>Job posted by: {address && address.substring(0, 6)}...{address && address.substring(address.length - 4)}</p>
-        <p>Platform fee: 2%</p>
+        <p>Platform fee: {platformFee !== null ? platformFee : 2.5}%</p>
       </CardFooter>
     </Card>
   );
