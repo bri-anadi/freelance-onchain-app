@@ -15,7 +15,7 @@ import { Loader2 } from 'lucide-react';
 
 export default function UserDashboard() {
   const { address, isConnected } = useAccount();
-  const [selectedJob, setSelectedJob] = useState<any | null>(null);
+  const [setSelectedJob] = useState<any | null>(null);
   const [deliverable, setDeliverable] = useState('');
   const [submittingWork, setSubmittingWork] = useState(false);
   const [txHash, setTxHash] = useState<string | null>(null);

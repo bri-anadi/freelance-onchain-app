@@ -15,8 +15,7 @@ import {
 } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
-import { formatEther, formatAddress, JobStatus } from '@/lib/utils';
+import { formatAddress } from '@/lib/utils';
 import { useContractRead, useContractWrite } from '@/hooks/useContract';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2, CheckCircle, XCircle } from 'lucide-react';
@@ -24,7 +23,7 @@ import { publicClient } from '@/lib/client';
 import { parseAbiItem } from 'viem';
 
 export default function AdminPanel() {
-  const { address, isConnected } = useAccount();
+  const { isConnected } = useAccount();
   const [isOwner, setIsOwner] = useState(false);
   const [loadingOwner, setLoadingOwner] = useState(true);
   const [platformFee, setPlatformFee] = useState(0);
