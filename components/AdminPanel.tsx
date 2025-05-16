@@ -21,9 +21,10 @@ import { useToast } from '@/components/ui/use-toast';
 import { Loader2, CheckCircle, XCircle } from 'lucide-react';
 import { publicClient } from '@/lib/client';
 import { parseAbiItem } from 'viem';
+import { CONTRACT_ADDRESS } from '@/lib/contract';
 
 export default function AdminPanel() {
-  const { isConnected } = useAccount();
+  const { address, isConnected } = useAccount();
   const [isOwner, setIsOwner] = useState(false);
   const [loadingOwner, setLoadingOwner] = useState(true);
   const [platformFee, setPlatformFee] = useState(0);
@@ -59,9 +60,7 @@ export default function AdminPanel() {
 
   const getContractAddress = () => {
     const chainId = process.env.NEXT_PUBLIC_CHAIN_ID;
-    return chainId === 'mainnet' ?
-      '0xB2295D19D18011F0FEC919c7e2427cB024e91ef7' :
-      '0x553af81FCd141bA428bc93b345B9E91A81D4641C';
+    return chainId === 'mainnet' ? CONTRACT_ADDRESS.mainnet : CONTRACT_ADDRESS.testnet;
   };
 
   // Check if user is owner
@@ -77,6 +76,9 @@ export default function AdminPanel() {
         setLoadingOwner(true);
         const owner = await isContractOwner();
         setIsOwner(owner);
+
+        console.log("Real owner check result:", owner);
+        console.log("Your address:", address);
 
         // Get platform settings
         const fee = await getPlatformFee();

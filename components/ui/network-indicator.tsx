@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useChainId } from 'wagmi';
 import { Badge } from '@/components/ui/badge';
 import { baseSepolia, base } from 'viem/chains';
+import { CONTRACT_ADDRESS } from '@/lib/contract';
 
 export function NetworkIndicator() {
   const chainId = useChainId();
@@ -27,9 +28,7 @@ export function NetworkIndicator() {
   useEffect(() => {
     const chainIdEnv = process.env.NEXT_PUBLIC_CHAIN_ID;
     console.log('Environment Chain ID setting:', chainIdEnv);
-    console.log('Contract address used:', chainIdEnv === 'mainnet'
-      ? '0xB2295D19D18011F0FEC919c7e2427cB024e91ef7'
-      : '0x553af81FCd141bA428bc93b345B9E91A81D4641C');
+    console.log('Contract address used:', chainIdEnv === 'mainnet' ? CONTRACT_ADDRESS.mainnet : CONTRACT_ADDRESS.testnet);
   }, []);
 
   return (

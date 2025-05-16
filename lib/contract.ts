@@ -2,8 +2,9 @@
 import { Address } from 'viem';
 
 export const CONTRACT_ADDRESS: Record<string, Address> = {
-	mainnet: '0xB2295D19D18011F0FEC919c7e2427cB024e91ef7' as Address, // Alamat kontrak di Base Mainnet
-	testnet: '0x553af81FCd141bA428bc93b345B9E91A81D4641C' as Address, // Alamat kontrak di Base Sepolia
+	mainnet: process.env.NEXT_PUBLIC_CONTRACT_ADDRESS_MAINNET as Address, // Alamat kontrak di Base Mainnet
+	// testnet: '0x553af81FCd141bA428bc93b345B9E91A81D4641C' as Address, // Alamat kontrak di Base Sepolia
+	testnet: process.env.NEXT_PUBLIC_CONTRACT_ADDRESS_TESTNET as Address, // Alamat kontrak di Base Sepolia
 };
 
 export const CONTRACT_ABI = [

@@ -13,13 +13,37 @@ import { useAccount } from 'wagmi';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { NetworkIndicator } from '@/components/ui/network-indicator';
 import { NetworkCheck } from '@/components/ui/network-check';
-
+import { useContractRead } from '@/hooks/useContract';
 export default function App() {
   const { isConnected } = useAccount();
+  const { isContractOwner } = useContractRead();
   const [connected, setConnected] = useState(false);
+  const [isOwner, setIsOwner] = useState(false);
+  const [loadingOwner, setLoadingOwner] = useState(true);
 
   // Update connected state when account connection changes
   useEffect(() => {
+    const checkOwner = async () => {
+      if (!isConnected) {
+        setIsOwner(false);
+        setLoadingOwner(false);
+        return;
+      }
+
+      try {
+        setLoadingOwner(true);
+        const owner = await isContractOwner();
+        setIsOwner(owner);
+
+        setLoadingOwner(false);
+      } catch (error) {
+        console.error('Error checking owner:', error);
+        setIsOwner(false);
+        setLoadingOwner(false);
+      }
+    };
+
+    checkOwner();
     setConnected(isConnected);
   }, [isConnected]);
 
@@ -35,7 +59,7 @@ export default function App() {
               <Wallet>
                 <ConnectWallet>
                   <Avatar className="h-6 w-6" />
-                  <Name />
+                  <Name className="hidden md:block" />
                 </ConnectWallet>
                 <WalletDropdown>
                   <Identity className="px-4 pt-3 pb-2" hasCopyAddressOnClick>
@@ -69,11 +93,11 @@ export default function App() {
           </div>
         ) : (
           <Tabs defaultValue="explore" className="w-full">
-            <TabsList className="grid grid-cols-4 mb-8">
+            <TabsList className={`grid mb-8 ${isOwner ? 'grid-cols-4' : 'grid-cols-3'}`}>
               <TabsTrigger value="explore">Explore Jobs</TabsTrigger>
               <TabsTrigger value="create">Post a Job</TabsTrigger>
               <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-              <TabsTrigger value="admin">Admin</TabsTrigger>
+              {isOwner && <TabsTrigger value="admin">Admin</TabsTrigger>}
             </TabsList>
 
             <TabsContent value="explore" className="space-y-4">
@@ -87,10 +111,11 @@ export default function App() {
             <TabsContent value="dashboard">
               <UserDashboard />
             </TabsContent>
-
+            {/* {isOwner && ( */}
             <TabsContent value="admin">
               <AdminPanel />
             </TabsContent>
+            {/* )} */}
           </Tabs>
         )}
       </main>
