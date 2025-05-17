@@ -22,6 +22,7 @@ import { Loader2, CheckCircle, XCircle } from 'lucide-react';
 import { publicClient } from '@/lib/client';
 import { parseAbiItem } from 'viem';
 import { CONTRACT_ADDRESS } from '@/lib/contract';
+import SubmissionVerifier from '@/components/SubmissionVerifier';
 
 export default function AdminPanel() {
   const { address, isConnected } = useAccount();
@@ -208,10 +209,16 @@ export default function AdminPanel() {
   }, [isOwner]);
 
   // Handle AI verification
-  const handleVerification = async (submissionId: number, verified: boolean) => {
+  const handleVerification = async (submissionId: number, verified: boolean, aiExplanation?: string) => {
     if (!isConnected || !isOwner) return;
 
     try {
+      // Log the AI explanation for troubleshooting if needed
+      if (aiExplanation) {
+        console.log(`AI verification for submission #${submissionId}: ${verified ? 'Verified' : 'Rejected'}`);
+        console.log(`Explanation: ${aiExplanation}`);
+      }
+
       // Call contract method to verify work
       const hash = await verifyWorkByAI(submissionId, verified);
 
@@ -513,41 +520,17 @@ export default function AdminPanel() {
                                     <h4 className="text-sm font-medium mb-1">Freelancer:</h4>
                                     <p className="text-sm">{formatAddress(selectedSubmission.freelancer)}</p>
                                   </div>
-                                  <div className="mb-4">
-                                    <h4 className="text-sm font-medium mb-1">Deliverable:</h4>
-                                    <div className="p-3 bg-muted rounded-md text-sm">
-                                      {selectedSubmission.deliverable}
-                                    </div>
-                                  </div>
-                                  <div className="mb-4">
-                                    <h4 className="text-sm font-medium mb-1">Submitted:</h4>
-                                    <p className="text-sm">{new Date(selectedSubmission.timestamp * 1000).toLocaleString()}</p>
-                                  </div>
+
+                                  <SubmissionVerifier
+                                    jobTitle={selectedSubmission.job.title}
+                                    jobDescription={selectedSubmission.job.description || "No description provided"}
+                                    deliverable={selectedSubmission.deliverable}
+                                    isProcessing={isWritePending}
+                                    onVerify={(verified, aiExplanation) => {
+                                      handleVerification(selectedSubmission.id, verified, aiExplanation);
+                                    }}
+                                  />
                                 </div>
-                                <DialogFooter>
-                                  <div className="flex space-x-2 w-full">
-                                    <Button
-                                      variant="destructive"
-                                      onClick={() => handleVerification(selectedSubmission.id, false)}
-                                      disabled={isWritePending}
-                                      className="flex-1"
-                                    >
-                                      {isWritePending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                      <XCircle className="mr-2 h-4 w-4" />
-                                      Reject
-                                    </Button>
-                                    <Button
-                                      variant="default"
-                                      onClick={() => handleVerification(selectedSubmission.id, true)}
-                                      disabled={isWritePending}
-                                      className="flex-1"
-                                    >
-                                      {isWritePending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                      <CheckCircle className="mr-2 h-4 w-4" />
-                                      Verify
-                                    </Button>
-                                  </div>
-                                </DialogFooter>
                               </>
                             )}
                           </DialogContent>

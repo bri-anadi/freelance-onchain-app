@@ -12,6 +12,7 @@ import { formatEther, calculateTimeLeft, JobStatus, ApplicationStatus } from '@/
 import { useContractRead, useContractWrite } from '@/hooks/useContract';
 import { useToast } from '@/components/ui/use-toast';
 import { Loader2 } from 'lucide-react';
+import WorkSubmissionForm from '@/components/WorkSubmissionForm';
 
 export default function UserDashboard() {
   const { address, isConnected } = useAccount();
@@ -81,14 +82,27 @@ export default function UserDashboard() {
   }, [isConnected, address]);
 
   // Handle submit work
-  const handleSubmitWork = async (jobId: number) => {
-    if (!isConnected || !deliverable.trim()) return;
+  const handleSubmitWork = async (jobId: number, deliverableText: string, evidenceImage: File | null) => {
+    if (!isConnected || !deliverableText.trim()) return;
 
     try {
       setSubmittingWork(true);
+
+      // Format the deliverable - include note about evidence if provided
+      let finalDeliverable = deliverableText;
+      if (evidenceImage) {
+        // Include a note in the deliverable about the evidence image
+        // This is just for information purposes since we're not storing the image
+        finalDeliverable += `\n\n[Proof of work provided: ${evidenceImage.name}]`;
+
+        // Log for demonstration purposes
+        console.log(`Evidence image would be processed: ${evidenceImage.name}`);
+        console.log(`File size: ${Math.round(evidenceImage.size / 1024)} KB`);
+      }
+
       // Call contract method to submit work
-      const hash = await submitWork(jobId, deliverable);
-      // Solo almacenar el hash si es un string válido
+      const hash = await submitWork(jobId, finalDeliverable);
+
       if (typeof hash === 'string') {
         setTxHash(hash);
       }
@@ -96,14 +110,14 @@ export default function UserDashboard() {
       // Reset form and close dialog
       setSubmittingWork(false);
       setSelectedJob(null);
-      setDeliverable('');
 
       // Add the new submission to the list (optimistic update)
       const newSubmission = {
         id: Math.floor(Math.random() * 1000), // Temporary ID until we refresh
         jobId,
         jobTitle: applications.find(app => app.jobId === jobId)?.jobTitle || '',
-        deliverable,
+        deliverable: finalDeliverable,
+        hasEvidence: !!evidenceImage,
         aiVerified: false,
         posterApproved: false,
         timestamp: Math.floor(Date.now() / 1000),
@@ -278,38 +292,21 @@ export default function UserDashboard() {
                   <CardFooter>
                     {app.status === ApplicationStatus.ACCEPTED && (
                       <Dialog>
-                        <DialogTrigger asChild>
-                          <Button onClick={() => setSelectedJob({ id: app.jobId, title: app.jobTitle })}>
-                            Submit Work
-                          </Button>
-                        </DialogTrigger>
-                        <DialogContent>
-                          <DialogHeader>
-                            <DialogTitle>Submit Work for {app.jobTitle}</DialogTitle>
-                            <DialogDescription>
-                              Describe the work you've completed and provide any relevant links or information.
-                            </DialogDescription>
-                          </DialogHeader>
-                          <div className="py-4">
-                            <Textarea
-                              placeholder="Describe your completed work and include any relevant links..."
-                              value={deliverable}
-                              onChange={(e) => setDeliverable(e.target.value)}
-                              className="min-h-[150px]"
-                              disabled={submittingWork || isWritePending}
-                            />
-                          </div>
-                          <DialogFooter>
-                            <Button
-                              onClick={() => handleSubmitWork(app.jobId)}
-                              disabled={submittingWork || !deliverable.trim() || isWritePending}
-                            >
-                              {(submittingWork || isWritePending) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                              Submit Work
-                            </Button>
-                          </DialogFooter>
-                        </DialogContent>
-                      </Dialog>
+                      <DialogTrigger asChild>
+                        <Button>Submit Work</Button>
+                      </DialogTrigger>
+                      <DialogContent>
+                        {app && (
+                          <WorkSubmissionForm
+                            jobTitle={app.jobTitle}
+                            isSubmitting={submittingWork || isWritePending}
+                            onSubmit={async (deliverable, evidenceImage) => {
+                              await handleSubmitWork(app.jobId, deliverable, evidenceImage);
+                            }}
+                          />
+                        )}
+                      </DialogContent>
+                    </Dialog>
                     )}
                   </CardFooter>
                 </Card>
