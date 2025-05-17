@@ -2,8 +2,7 @@
 
 /**
  * Service for handling work evidence and verification
- * This simplified version only interacts with the verification API
- * and doesn't store any data in a database or IPFS
+ * This service interacts directly with the verification API
  */
 
 const API_URL = 'https://unlocked-base-backend-production.up.railway.app/task-verification';
