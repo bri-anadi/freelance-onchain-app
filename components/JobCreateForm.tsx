@@ -160,8 +160,8 @@ export default function JobCreateForm() {
                 id="reward"
                 type="number"
                 placeholder="0.1"
-                min="0.001"
-                step="0.001"
+                min="0.0001"
+                step="0.0001"
                 value={reward}
                 onChange={(e) => setReward(e.target.value)}
                 required
