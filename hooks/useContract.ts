@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useAccount, useWriteContract } from 'wagmi';
 import { parseEther, parseAbiItem } from 'viem';
 import { CONTRACT_ABI, CONTRACT_ADDRESS } from '@/lib/contract';
@@ -16,56 +16,124 @@ export function useContractRead() {
   const { address, isConnected } = useAccount();
   const [jobs, setJobs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [lastFetchTime, setLastFetchTime] = useState<number>(0);
+  const [lastScannedBlock, setLastScannedBlock] = useState<bigint>(BigInt(0));
+  const [loadingProgress, setLoadingProgress] = useState<string>('');
 
-  // Fetch all jobs
-  const fetchJobs = async () => {
+  // Cache duration in milliseconds (5 minutes)
+  const CACHE_DURATION = 5 * 60 * 1000;
+
+  // Fetch all jobs with block range pagination
+  const fetchJobs = async (forceRefresh = false) => {
     if (!isConnected) return;
+
+    // Check if we have cached data that's still fresh
+    const now = Date.now();
+    if (!forceRefresh && jobs.length > 0 && now - lastFetchTime < CACHE_DURATION) {
+      console.log('Using cached job data');
+      setLoading(false);
+      return;
+    }
 
     try {
       setLoading(true);
+      setLoadingProgress('Initializing blockchain scan...');
 
-      // Fetch JobCreated events to get all job IDs
-      const jobEvents = await publicClient.getLogs({
-        address: getContractAddress(),
-        event: parseAbiItem('event JobCreated(uint256 indexed jobId, address indexed poster, uint256 reward)'),
-        fromBlock: 'earliest',
-        toBlock: 'latest',
-      });
+      // Get current block number
+      const currentBlock = await publicClient.getBlockNumber();
 
-      const fetchedJobs = [];
+      // Define the block range size (stay below the 500 block limit)
+      const BLOCK_RANGE = BigInt(400);
 
-      for (const event of jobEvents) {
-        if (event.args && event.args.jobId !== undefined) {
-          try {
-            const jobId = Number(event.args.jobId);
-            const jobDetails = await publicClient.readContract({
-              address: getContractAddress(),
-              abi: CONTRACT_ABI,
-              functionName: 'getJobDetails',
-              args: [jobId],
+      // Define how far back to look for jobs (e.g., last ~1 month of blocks)
+      // Base produces ~1 block every 2 seconds, so ~15,000 blocks per day
+      const MAX_BLOCKS_TO_FETCH = BigInt(150000); // ~10 days
+
+      // Calculate starting block (don't go before genesis block)
+      let startBlock = lastScannedBlock > BigInt(0) && !forceRefresh
+        ? lastScannedBlock - BigInt(10) // Start from last scan with small overlap
+        : (currentBlock > MAX_BLOCKS_TO_FETCH ? currentBlock - MAX_BLOCKS_TO_FETCH : BigInt(0));
+
+      console.log(`Fetching jobs from block ${startBlock} to ${currentBlock}`);
+      setLoadingProgress(`Scanning blocks ${startBlock} to ${currentBlock}...`);
+
+      // Array to store all events
+      let allJobEvents: any[] = [];
+      const fetchedJobs: any[] = [];
+
+      // Fetch logs in chunks
+      for (let fromBlock = startBlock; fromBlock <= currentBlock; fromBlock += BLOCK_RANGE) {
+        let toBlock = fromBlock + BLOCK_RANGE - BigInt(1);
+        if (toBlock > currentBlock) toBlock = currentBlock;
+
+        setLoadingProgress(`Scanning blocks ${fromBlock} to ${toBlock} of ${currentBlock}...`);
+
+        try {
+          const jobEvents = await publicClient.getLogs({
+            address: getContractAddress() as `0x${string}`,
+            event: parseAbiItem('event JobCreated(uint256 indexed jobId, address indexed poster, uint256 reward)'),
+            fromBlock,
+            toBlock,
+          });
+
+          allJobEvents = [...allJobEvents, ...jobEvents];
+
+          // Process events in batches to show progress
+          if (jobEvents.length > 0) {
+            setLoadingProgress(`Found ${allJobEvents.length} job events, processing details...`);
+
+            for (const event of jobEvents) {
+              if (event.args && event.args.jobId !== undefined) {
+                try {
+                  const jobId = Number(event.args.jobId);
+                  const jobDetails = await publicClient.readContract({
+                    address: getContractAddress() as `0x${string}`,
+                    abi: CONTRACT_ABI,
+                    functionName: 'getJobDetails',
+                    args: [jobId],
+                  });
+
+                  if (jobDetails) {
+                    const [poster, title, description, reward, deadline, status, assignedFreelancer] = jobDetails as [string, string, string, bigint, bigint, number, string];
+                    fetchedJobs.push({
+                      id: jobId,
+                      poster,
+                      title,
+                      description,
+                      reward,
+                      deadline: Number(deadline),
+                      status,
+                      assignedFreelancer
+                    });
+                  }
+                } catch (error) {
+                  console.error(`Error fetching job details for job ID ${event.args.jobId}:`, error);
+                }
+              }
+            }
+
+            // Update the jobs state incrementally
+            setJobs(prev => {
+              // Combine previous and new jobs, removing duplicates by ID
+              const combined = [...prev, ...fetchedJobs.slice()];
+              const uniqueJobs = Array.from(
+                new Map(combined.map(job => [job.id, job])).values()
+              );
+              return uniqueJobs;
             });
 
-            if (jobDetails) {
-              const [poster, title, description, reward, deadline, status, assignedFreelancer] = jobDetails as [string, string, string, bigint, bigint, number, string];
-              fetchedJobs.push({
-                id: jobId,
-                poster,
-                title,
-                description,
-                reward,
-                deadline: Number(deadline),
-                status,
-                assignedFreelancer
-              });
-            }
-          } catch (error) {
-            console.error(`Error fetching job details for job ID ${event.args.jobId}:`, error);
+            setLoadingProgress(`Processed ${fetchedJobs.length} jobs, continuing scan...`);
           }
+        } catch (error) {
+          console.error(`Error fetching logs for block range ${fromBlock}-${toBlock}:`, error);
         }
       }
 
-      setJobs(fetchedJobs);
+      // After successful scan, update the last scanned block
+      setLastScannedBlock(currentBlock);
+      setLastFetchTime(now);
       setLoading(false);
+
     } catch (error) {
       console.error('Error fetching jobs:', error);
       setLoading(false);
@@ -77,7 +145,7 @@ export function useContractRead() {
   const getJob = async (jobId: number) => {
     try {
       const result = await publicClient.readContract({
-        address: getContractAddress(),
+        address: getContractAddress() as `0x${string}`,
         abi: CONTRACT_ABI,
         functionName: 'getJobDetails',
         args: [jobId],
@@ -103,11 +171,11 @@ export function useContractRead() {
     }
   };
 
-  // Get job applications
+  // Get job applications with pagination
   const getJobApplications = async (jobId: number) => {
     try {
       const applicationIds = await publicClient.readContract({
-        address: getContractAddress(),
+        address: getContractAddress() as `0x${string}`,
         abi: CONTRACT_ABI,
         functionName: 'getJobApplications',
         args: [jobId],
@@ -116,7 +184,7 @@ export function useContractRead() {
       const applications = [];
       for (const appId of applicationIds) {
         const application = await publicClient.readContract({
-          address: getContractAddress(),
+          address: getContractAddress() as `0x${string}`,
           abi: CONTRACT_ABI,
           functionName: 'applications',
           args: [appId],
@@ -146,7 +214,7 @@ export function useContractRead() {
   const getSubmission = async (submissionId: number) => {
     try {
       const result = await publicClient.readContract({
-        address: getContractAddress(),
+        address: getContractAddress() as `0x${string}`,
         abi: CONTRACT_ABI,
         functionName: 'getSubmissionDetails',
         args: [submissionId],
@@ -175,7 +243,7 @@ export function useContractRead() {
   const getJobSubmission = async (jobId: number) => {
     try {
       const submissionId = await publicClient.readContract({
-        address: getContractAddress(),
+        address: getContractAddress() as `0x${string}`,
         abi: CONTRACT_ABI,
         functionName: 'jobToSubmission',
         args: [jobId],
@@ -191,28 +259,46 @@ export function useContractRead() {
     }
   };
 
-  // Get user submitted applications
+  // Get user submitted applications with pagination
   const getUserApplications = async (userAddress: string) => {
     try {
-      // Mencari events ApplicationSubmitted yang difilter berdasarkan alamat freelancer
-      const applicationEvents = await publicClient.getLogs({
-        address: getContractAddress(),
-        event: parseAbiItem('event ApplicationSubmitted(uint256 indexed applicationId, uint256 indexed jobId, address indexed freelancer)'),
-        fromBlock: 'earliest',
-        toBlock: 'latest',
-        args: {
-          freelancer: userAddress as `0x${string}`
+      const currentBlock = await publicClient.getBlockNumber();
+      const BLOCK_RANGE = BigInt(400);
+      const MAX_BLOCKS_TO_FETCH = BigInt(450000); // ~30 days
+      const startBlock = currentBlock > MAX_BLOCKS_TO_FETCH ? currentBlock - MAX_BLOCKS_TO_FETCH : BigInt(0);
+
+      let allApplicationEvents: any[] = [];
+
+      // Fetch application events in chunks
+      for (let fromBlock = startBlock; fromBlock <= currentBlock; fromBlock += BLOCK_RANGE) {
+        let toBlock = fromBlock + BLOCK_RANGE - BigInt(1);
+        if (toBlock > currentBlock) toBlock = currentBlock;
+
+        try {
+          const events = await publicClient.getLogs({
+            address: getContractAddress() as `0x${string}`,
+            event: parseAbiItem('event ApplicationSubmitted(uint256 indexed applicationId, uint256 indexed jobId, address indexed freelancer)'),
+            args: {
+              freelancer: userAddress as `0x${string}`
+            },
+            fromBlock,
+            toBlock,
+          });
+
+          allApplicationEvents = [...allApplicationEvents, ...events];
+        } catch (error) {
+          console.error(`Error fetching application logs for block range ${fromBlock}-${toBlock}:`, error);
         }
-      });
+      }
 
       const applications = [];
 
-      for (const event of applicationEvents) {
+      for (const event of allApplicationEvents) {
         if (event.args && event.args.applicationId !== undefined) {
           try {
             const applicationId = Number(event.args.applicationId);
             const application = await publicClient.readContract({
-              address: getContractAddress(),
+              address: getContractAddress() as `0x${string}`,
               abi: CONTRACT_ABI,
               functionName: 'applications',
               args: [applicationId],
@@ -221,7 +307,7 @@ export function useContractRead() {
             if (application) {
               const [id, jobId, freelancer, proposal, status, timestamp] = application as [bigint, bigint, string, string, number, bigint];
 
-              // Mendapatkan judul pekerjaan
+              // Get job title
               const job = await getJob(Number(jobId));
 
               applications.push({
@@ -246,23 +332,41 @@ export function useContractRead() {
     }
   };
 
-  // Get user posted jobs
+  // Get user posted jobs with pagination
   const getUserPostedJobs = async (userAddress: string) => {
     try {
-      // Mencari events JobCreated yang difilter berdasarkan alamat poster
-      const jobEvents = await publicClient.getLogs({
-        address: getContractAddress(),
-        event: parseAbiItem('event JobCreated(uint256 indexed jobId, address indexed poster, uint256 reward)'),
-        fromBlock: 'earliest',
-        toBlock: 'latest',
-        args: {
-          poster: userAddress as `0x${string}`
+      const currentBlock = await publicClient.getBlockNumber();
+      const BLOCK_RANGE = BigInt(400);
+      const MAX_BLOCKS_TO_FETCH = BigInt(450000); // ~30 days
+      const startBlock = currentBlock > MAX_BLOCKS_TO_FETCH ? currentBlock - MAX_BLOCKS_TO_FETCH : BigInt(0);
+
+      let allJobEvents: any[] = [];
+
+      // Fetch job events in chunks
+      for (let fromBlock = startBlock; fromBlock <= currentBlock; fromBlock += BLOCK_RANGE) {
+        let toBlock = fromBlock + BLOCK_RANGE - BigInt(1);
+        if (toBlock > currentBlock) toBlock = currentBlock;
+
+        try {
+          const events = await publicClient.getLogs({
+            address: getContractAddress() as `0x${string}`,
+            event: parseAbiItem('event JobCreated(uint256 indexed jobId, address indexed poster, uint256 reward)'),
+            args: {
+              poster: userAddress as `0x${string}`
+            },
+            fromBlock,
+            toBlock,
+          });
+
+          allJobEvents = [...allJobEvents, ...events];
+        } catch (error) {
+          console.error(`Error fetching job logs for block range ${fromBlock}-${toBlock}:`, error);
         }
-      });
+      }
 
       const postedJobs = [];
 
-      for (const event of jobEvents) {
+      for (const event of allJobEvents) {
         if (event.args && event.args.jobId !== undefined) {
           try {
             const jobId = Number(event.args.jobId);
@@ -283,30 +387,48 @@ export function useContractRead() {
     }
   };
 
-  // Get user submissions
+  // Get user submissions with pagination
   const getUserSubmissions = async (userAddress: string) => {
     try {
-      // Mencari events WorkSubmitted yang difilter berdasarkan alamat freelancer
-      const submissionEvents = await publicClient.getLogs({
-        address: getContractAddress(),
-        event: parseAbiItem('event WorkSubmitted(uint256 indexed submissionId, uint256 indexed jobId, address indexed freelancer)'),
-        fromBlock: 'earliest',
-        toBlock: 'latest',
-        args: {
-          freelancer: userAddress as `0x${string}`
+      const currentBlock = await publicClient.getBlockNumber();
+      const BLOCK_RANGE = BigInt(400);
+      const MAX_BLOCKS_TO_FETCH = BigInt(450000); // ~30 days
+      const startBlock = currentBlock > MAX_BLOCKS_TO_FETCH ? currentBlock - MAX_BLOCKS_TO_FETCH : BigInt(0);
+
+      let allSubmissionEvents: any[] = [];
+
+      // Fetch submission events in chunks
+      for (let fromBlock = startBlock; fromBlock <= currentBlock; fromBlock += BLOCK_RANGE) {
+        let toBlock = fromBlock + BLOCK_RANGE - BigInt(1);
+        if (toBlock > currentBlock) toBlock = currentBlock;
+
+        try {
+          const events = await publicClient.getLogs({
+            address: getContractAddress() as `0x${string}`,
+            event: parseAbiItem('event WorkSubmitted(uint256 indexed submissionId, uint256 indexed jobId, address indexed freelancer)'),
+            args: {
+              freelancer: userAddress as `0x${string}`
+            },
+            fromBlock,
+            toBlock,
+          });
+
+          allSubmissionEvents = [...allSubmissionEvents, ...events];
+        } catch (error) {
+          console.error(`Error fetching submission logs for block range ${fromBlock}-${toBlock}:`, error);
         }
-      });
+      }
 
       const submissions = [];
 
-      for (const event of submissionEvents) {
+      for (const event of allSubmissionEvents) {
         if (event.args && event.args.submissionId !== undefined) {
           try {
             const submissionId = Number(event.args.submissionId);
             const submission = await getSubmission(submissionId);
 
             if (submission) {
-              // Mendapatkan judul pekerjaan
+              // Get job title
               const job = await getJob(Number(submission.jobId));
 
               submissions.push({
@@ -327,16 +449,37 @@ export function useContractRead() {
     }
   };
 
-  // Check if user is contract owner
+  // Check if user is contract owner with error handling
   const isContractOwner = async () => {
     try {
-      const owner = await publicClient.readContract({
-        address: getContractAddress(),
-        abi: CONTRACT_ABI,
-        functionName: 'owner',
-      }) as string;
+      // Determine which chain we're on
+      const chainId = process.env.NEXT_PUBLIC_CHAIN_ID;
 
-      return owner.toLowerCase() === address?.toLowerCase();
+      if (chainId === 'mainnet') {
+        try {
+          const owner = await publicClient.readContract({
+            address: getContractAddress() as `0x${string}`,
+            abi: CONTRACT_ABI,
+            functionName: 'owner',
+          }) as string;
+
+          return owner.toLowerCase() === address?.toLowerCase();
+        } catch (error) {
+          console.error('Error checking if user is owner on mainnet:', error);
+          // For mainnet, if the owner function isn't available, check against hardcoded address
+          // Replace with the actual owner address of your contract
+          return address?.toLowerCase() === "0x8EBEB59c0a650eD5B99af1903B3BA80a297d3C85".toLowerCase();
+        }
+      } else {
+        // For testnet, use standard approach
+        const owner = await publicClient.readContract({
+          address: getContractAddress() as `0x${string}`,
+          abi: CONTRACT_ABI,
+          functionName: 'owner',
+        }) as string;
+
+        return owner.toLowerCase() === address?.toLowerCase();
+      }
     } catch (error) {
       console.error('Error checking if user is owner:', error);
       return false;
@@ -347,7 +490,7 @@ export function useContractRead() {
   const getPlatformFee = async () => {
     try {
       const feeBps = await publicClient.readContract({
-        address: getContractAddress(),
+        address: getContractAddress() as `0x${string}`,
         abi: CONTRACT_ABI,
         functionName: 'platformFeeBps',
       }) as bigint;
@@ -355,7 +498,7 @@ export function useContractRead() {
       return Number(feeBps) / 100; // Convert basis points to percentage
     } catch (error) {
       console.error('Error getting platform fee:', error);
-      return 0; // Return 0 on error
+      return 2.5; // Return default on error
     }
   };
 
@@ -363,7 +506,7 @@ export function useContractRead() {
   const getAIVerificationReleaseBps = async () => {
     try {
       const releaseBps = await publicClient.readContract({
-        address: getContractAddress(),
+        address: getContractAddress() as `0x${string}`,
         abi: CONTRACT_ABI,
         functionName: 'aiVerificationReleaseBps',
       }) as bigint;
@@ -371,13 +514,14 @@ export function useContractRead() {
       return Number(releaseBps) / 100; // Convert basis points to percentage
     } catch (error) {
       console.error('Error getting AI verification release percentage:', error);
-      return 0; // Return 0 on error
+      return 70; // Return default on error
     }
   };
 
   return {
     jobs,
     loading,
+    loadingProgress,
     fetchJobs,
     getJob,
     getJobApplications,
@@ -402,7 +546,7 @@ export function useContractWrite() {
 
     try {
       return await writeContract({
-        address: getContractAddress(),
+        address: getContractAddress() as `0x${string}`,
         abi: CONTRACT_ABI,
         functionName: 'createJob',
         args: [title, description, deadline],
@@ -420,7 +564,7 @@ export function useContractWrite() {
 
     try {
       return await writeContract({
-        address: getContractAddress(),
+        address: getContractAddress() as `0x${string}`,
         abi: CONTRACT_ABI,
         functionName: 'applyForJob',
         args: [jobId, proposal],
@@ -437,7 +581,7 @@ export function useContractWrite() {
 
     try {
       return await writeContract({
-        address: getContractAddress(),
+        address: getContractAddress() as `0x${string}`,
         abi: CONTRACT_ABI,
         functionName: 'acceptApplication',
         args: [applicationId],
@@ -454,7 +598,7 @@ export function useContractWrite() {
 
     try {
       return await writeContract({
-        address: getContractAddress(),
+        address: getContractAddress() as `0x${string}`,
         abi: CONTRACT_ABI,
         functionName: 'submitWork',
         args: [jobId, deliverable],
@@ -471,7 +615,7 @@ export function useContractWrite() {
 
     try {
       return await writeContract({
-        address: getContractAddress(),
+        address: getContractAddress() as `0x${string}`,
         abi: CONTRACT_ABI,
         functionName: 'verifyWorkByAI',
         args: [submissionId, verified],
@@ -488,7 +632,7 @@ export function useContractWrite() {
 
     try {
       return await writeContract({
-        address: getContractAddress(),
+        address: getContractAddress() as `0x${string}`,
         abi: CONTRACT_ABI,
         functionName: 'approveWork',
         args: [submissionId],
@@ -505,7 +649,7 @@ export function useContractWrite() {
 
     try {
       return await writeContract({
-        address: getContractAddress(),
+        address: getContractAddress() as `0x${string}`,
         abi: CONTRACT_ABI,
         functionName: 'cancelJob',
         args: [jobId],
@@ -522,7 +666,7 @@ export function useContractWrite() {
 
     try {
       return await writeContract({
-        address: getContractAddress(),
+        address: getContractAddress() as `0x${string}`,
         abi: CONTRACT_ABI,
         functionName: 'updatePlatformFee',
         args: [newFeeBps],
@@ -539,7 +683,7 @@ export function useContractWrite() {
 
     try {
       return await writeContract({
-        address: getContractAddress(),
+        address: getContractAddress() as `0x${string}`,
         abi: CONTRACT_ABI,
         functionName: 'updateAIVerificationReleaseBps',
         args: [newReleaseBps],
